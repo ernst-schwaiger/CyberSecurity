@@ -9,7 +9,7 @@ SEC_OPTS=-fno-stack-protector -z execstack -no-pie
 DEBUG_OPTS=-ggdb3 -O0
 # turn on optimizations to get some ROP gadgets
 DEBUG_OPTS_ROP=-ggdb3 -O2
-INCLUDES=-I../openssl/include -I/usr/include -I/usr/include/x86_64-linux-gnu -Isrc
+INCLUDES=-Iopenssl/include -I/usr/include -I/usr/include/x86_64-linux-gnu -Ipotato2/src
 DEFINES=-D_FORTIFY_SOURCE=0
 
 CCOPTS = $(WARN_OPTS) $(SEC_OPTS) $(DEBUG_OPTS) $(INCLUDES) $(DEFINES)
@@ -17,18 +17,18 @@ CCOPTS = $(WARN_OPTS) $(SEC_OPTS) $(DEBUG_OPTS) $(INCLUDES) $(DEFINES)
 CCOPTS4ROP = -static $(WARN_OPTS) $(SEC_OPTS) $(DEBUG_OPTS_ROP) $(INCLUDES) $(DEFINES)
 
 CFILES = \
-	src/main.c \
-	src/runr.c \
-	src/sock.c \
-	src/userlist.c \
-	src/func.c \
-	src/login2.c
+	potato2/src/main.c \
+	potato2/src/runr.c \
+	potato2/src/sock.c \
+	potato2/src/userlist.c \
+	potato2/src/func.c \
+	potato2/src/login2.c
 
 HFILES = \
-	src/runr.h \
-	src/sock.h \
-	src/user.h \
-	src/userlist.h 
+	potato2/src/runr.h \
+	potato2/src/sock.h \
+	potato2/src/user.h \
+	potato2/src/userlist.h 
 
 .PHONY: clean all
 
@@ -36,11 +36,11 @@ all: potato potato_rop
 
 # binary for usual attacks
 potato: $(CFILES) $(HFILES)
-	gcc -m32 $(CCOPTS) -o potato $(CFILES) -L../openssl  -lssl -lcrypto 
+	gcc -m32 $(CCOPTS) -o potato $(CFILES) -Lopenssl  -lssl -lcrypto 
 
 # binary for ROP attack
 potato_rop: $(CFILES) $(HFILES)
-	gcc -m32 $(CCOPTS4ROP) -o potato_rop $(CFILES) -L../openssl  -lssl -lcrypto 
+	gcc -m32 $(CCOPTS4ROP) -o potato_rop $(CFILES) -Lopenssl  -lssl -lcrypto 
 
 clean:
 	rm -f potato potato_rop
