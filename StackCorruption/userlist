@@ -1,0 +1,6 @@
+root:2f99191d04198a3f778043dda155ba0f:0:/root:/bin/bash
+peter:827ccb0eea8a706c4c34a16891f84e7b:10000:/home/peter:/usr/bin/rbash
+mario:5e455c58e29cce3c164506ee28f72ccc:10001:/home/mario:/usr/sbin/nologin
+alberto:x:10002:/home/alberto:/usr/bin/rbash
+livero:x:1003:/home/livero:/usr/bin/rbash
+emil:202cb962ac59075b964b07152d234b70:10004:/home/emil:/bin/sh
