@@ -6,7 +6,7 @@ from struct import pack
 
 import sys
 
-elf = ELF("./potato2/potato")
+elf = ELF("./potato")
 context.binary = elf
 context.arch = 'i386'
 context.bits = 32
@@ -17,7 +17,6 @@ p = elf.process(["console"], stdin=PTY, aslr=False) # stdin=PTY for "getpass" pa
 gdb.attach(p, '''
 break main
 #break main.c:119
-break func.c:188
 break func.c:191
 continue
 ''')

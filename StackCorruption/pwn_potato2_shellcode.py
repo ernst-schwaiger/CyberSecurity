@@ -6,7 +6,7 @@ from struct import pack
 
 import sys
 
-elf = ELF("./potato2/potato")
+elf = ELF("./potato")
 context.binary = elf
 context.arch = 'i386'
 context.bits = 32
