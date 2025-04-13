@@ -1,8 +1,20 @@
 # Object files
 *.o
 
+# Core files
+core
+
+# Binaries
+potato
+potato_rop
+
 # OpenSSL, Potato files
-StackCorruption/openssl/*
-StackCorruption/potato/*
-HeapCorruption/openssl/*
-HeapCorruption/potato/*
+StackCorruption/openssl/
+StackCorruption/potato2/
+HeapCorruption/openssl/
+HeapCorruption/potato2/
+
+StackCorruption/userlist
+StackCorruption/shellcode/listfile.list
+HeapCorruption/userlist
+
