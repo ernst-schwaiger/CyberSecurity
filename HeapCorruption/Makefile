@@ -1,13 +1,12 @@
 
 # needs to have openssl checked out as sibling folder of potato
 # git clone https://github.com/openssl/openssl.git
-# and requires installation of gcc multilib
-# sudo apt install gcc-multilib for m32
+# and requires linking of custom built glibc 2.41
 
 WARN_OPTS=-Wno-deprecated-declarations -Wno-unused-result
 SEC_OPTS=-fno-stack-protector -z execstack -no-pie
 DEBUG_OPTS=-ggdb3 -O0
-INCLUDES=-Iopenssl/include -I/usr/include -Ipotato2/src
+INCLUDES=-Iopenssl/include -Iglibc/include -Ipotato2/src
 DEFINES=-D_FORTIFY_SOURCE=0
 
 CCOPTS = $(WARN_OPTS) $(SEC_OPTS) $(DEBUG_OPTS) $(INCLUDES) $(DEFINES)
@@ -32,7 +31,7 @@ all: potato
 
 # binary for usual attacks
 potato: $(CFILES) $(HFILES)
-	gcc -m32 $(CCOPTS) -o potato $(CFILES) -Lopenssl  -lssl -lcrypto 
+	gcc $(CCOPTS) -m32 -static -o potato -Lopenssl -Lglibc/lib $(CFILES) -lssl -lcrypto -lc
 
 clean:
 	rm -f potato

@@ -14,6 +14,7 @@ glibc with debugging symbols, and gdb enhanced features/gef:
 sudo apt install gcc 
 sudo apt install gcc-multilib
 sudo apt install libc6-dbg-i386-cross
+sudo apt install glibc-source
 sudo apt install python3-virtualenv
 bash -c "$(curl -fsSL https://gef.blah.cat/sh)"
 ```
@@ -93,60 +94,6 @@ On Kali systems, `LD_LIBRARY_PATH` is empty, hence an error message
 export LD_LIBRARY_PATH=<openssl_folder>:$LD_LIBRARY_PATH
 ```
 
-## Spotting vulnerabilities
-
-Before looking at the code, `grep` can be used for a quick scan through the source for finding
-C stdlib functions that are insecure, or can be used in an insecure way:
-
-```bash
-find potato2/src -name "*.c" | xargs grep -w -n \
-  -e "gets" \
-  -e "strcpy" \
-  -e "strcat" \
-  -e "sprintf" \
-  -e "vsprintf" \
-  -e "scanf" \
-  -e "fscanf" \
-  -e "sscanf" \
-  -e "memcpy" \
-  -e "memmove" \
-  -e "strtok"
-
-potato2/src/login2.c:43:    strcpy(user->name, username);
-potato2/src/login2.c:44:    sprintf(user->home, "/home/%s", username);
-potato2/src/login2.c:45:    strcpy(user->shell, "/usr/bin/rbash");
-potato2/src/func.c:60:    scanf("%d", &id);
-potato2/src/func.c:187:    fscanf(stdin, "%s", input_username); // TODO security
-potato2/src/userlist.c:240:    token = strtok(line, ":");
-potato2/src/userlist.c:246:                strcpy(parsed_user->name, token);
-potato2/src/userlist.c:257:                     strcpy(parsed_user->home, token);
-potato2/src/userlist.c:260:                     strcpy(parsed_user->shell, token);
-potato2/src/userlist.c:266:       token = strtok(NULL, ":");
-```
-
-The code at `func.c`, line 187 looks promising. The function `fscanf` in `change_name()` reads
-a string from `stdin` and stores it in `input_username`. If the user
-enters more than `USERNAME_LENGTH` characters, a buffer overflow happens. By providing more
-bytes than `input_username` can hold, the return address in the stack frame can be overwritten 
-by a user-chosen address. This will redirect the path of execution to that address once the
-execution of `change_name()` finishes.
-
-```c
-void
-change_name()
-{
-    char input_username[USERNAME_LENGTH];
-        
-    fprintf(stdout, "What is the name > ");
-    //fgets(input_username, sizeof(input_username), stdin);
-    fscanf(stdin, "%s", input_username); // TODO security
-    input_username[strcspn(input_username, "\n")] = 0x00; // terminator instead of a newline
-
-    strncpy(session.logged_in_user->name, input_username, strlen(input_username)+1);
-    fprintf(stdout, "Name changed.\n");
-}
-```
-
 ## Setup of the debugging environment
 
 Start a python virtual environment, install the `pwntools` and `libheap` packages.
@@ -183,8 +130,8 @@ is_privileged()
 }
 ```
 
-For that purpose, we exploit the fact that the `strncpy()` call always appends the string 
-terminator `0x00` to the target string:
+For that purpose, we exploit the fact that the `strncpy()` call in `change_name()` always 
+appends the string terminator `0x00` to the target string:
 
 ```c
 void
@@ -225,7 +172,7 @@ gef➤  x/4bx &session->logged_in_user->id
 0x8050464:      0x10    0x27    0x00    0x00
 ```
 
-In order to get the number of bytes to overwrite until we arrive at the LSB of `id` is `0x34`, or `52` and 
+The number of bytes to overwrite until we arrive at the LSB of `id` is `0x34`, or `52`; it 
 can be calculates as follows:
 
 ```gdb
@@ -238,7 +185,7 @@ $3 = 0x34
 gef➤  
 ```
 
-I.e. by providing a string of length `52 + 1`, `strncpy` will overwrite the `0x27` byte of the `id` field with `0x00`,
+By providing a string of length `52 + 1`, `strncpy` will overwrite the `0x27` byte of the `id` field with `0x00`,
 by providing a string of length `52`, `strncpy` will overwrite the `0x10` byte.
 
 ```python
@@ -294,7 +241,102 @@ user(name='peter' id=0 gid=10000 home='/home/peter' shell='/usr/bin/rbash')
 
 ## find a memory leak to identify a heap bin or chunk (look at the session and whoami; it's enough to show the chunk or memory location in gdb) [3]
 
+The function `str2md5()` allocates a buffer of 90 bytes which it returns to the calling function. The calling function then has to dispose of
+that buffer after usage. In `change_password()` and in `check_password()`, however, the allocated memory is not given back. A memory leak
+is caused by an attempt to login, no matter whether it was successful or not.
+
+
+```bash
+wget http://ftp.gnu.org/gnu/libc/glibc-6.2.tar.gz  
+tar -xf glibc-6.2.tar.gz  
+sudo apt install bison
+export LD_LIBRARY_PATH=""
+../configure --prefix=/home/kali/projects/CyberSecurity/HeapCorruption/glibc --host=i686-linux-gnu CFLAGS="-m32" CPPFLAGS="-m32" --enable-debug
+../configure --prefix=/home/kali/projects/CyberSecurity/HeapCorruption/glibc CFLAGS="-Og -g -Wno-maybe-uninitialized" CPPFLAGS="-Og -g -Wno-maybe-uninitialized" --enable-debug
+```
+
 ## gain a shell with root privileges (look at the allocator with ltrace while creating and deleting users) [4]
+
+Download a glibc version, e.g. 2.41 `https://ftp.gnu.org/gnu/glibc/glibc-2.41.tar.gz`, configure it
+for 32 bit compilation with debugging info, then compile and install it, e.g. to `$HOME/projects/CyberSecurity/HeapCorruption/glibc`:
+
+```bash
+cd glibc-2.41
+mkdir build
+cd build
+../configure --prefix=$HOME/projects/CyberSecurity/HeapCorruption/glibc \
+     --host=i686-linux-gnu \
+     --build=i686-linux-gnu \
+     CC="gcc -m32" CXX="g++ -m32" \
+     CFLAGS="-O2 -g -march=i686" \
+     CXXFLAGS="-O2 -g -march=i686"
+make -sj
+make install
+
+
+for X86-64:
+../configure --prefix=$HOME/projects/CyberSecurity/HeapCorruption/glibc64 \
+     CFLAGS="-O2 -g" \
+     CXXFLAGS="-O2 -g"
+
+
+```
+
+The target binary can now be linked against the built library using, e.g.:
+
+```Makefile
+CCOPTS=-ggdb3 -O0 -m32
+GLIBC_FOLDER=/home/kali/projects/CyberSecurity/HeapCorruption/glibc
+GLIBC_LIB=/home/kali/projects/CyberSecurity/HeapCorruption/glibc-2.41/build
+GLIBC_INC=/home/kali/projects/CyberSecurity/HeapCorruption/glibc/include 
+
+all: demo
+
+demo: demo.c
+	gcc $(CCOPTS) -I$(GLIBC_INC) -o demo demo.c -L$(GLIBC_LIB) -Wl,-rpath,$(GLIBC_LIB) -lc
+
+clean:
+	rm -f demo
+```
+
+Ensure the binary actually will load the built shared object file in RUNPATH:
+
+```bash
+readelf -d demo
+Dynamic section at offset 0x2ee4 contains 27 entries:
+  Tag        Type                         Name/Value
+ 0x00000001 (NEEDED)                     Shared library: [libc.so.6]
+ 0x0000001d (RUNPATH)                    Library runpath: [/home/kali/projects/CyberSecurity/HeapCorruption/glibc-2.41/build]
+ 0x0000000c (INIT)                       0x1000
+ 0x0000000d (FINI)                       0x1564
+ 0x00000019 (INIT_ARRAY)                 0x3edc
+ 0x0000001b (INIT_ARRAYSZ)               4 (bytes)
+ 0x0000001a (FINI_ARRAY)                 0x3ee0
+ 0x0000001c (FINI_ARRAYSZ)               4 (bytes)
+ 0x6ffffef5 (GNU_HASH)                   0x1ec
+ 0x00000005 (STRTAB)                     0x2ec
+ 0x00000006 (SYMTAB)                     0x20c
+ 0x0000000a (STRSZ)                      279 (bytes)
+ 0x0000000b (SYMENT)                     16 (bytes)
+ 0x00000015 (DEBUG)                      0x0
+ 0x00000003 (PLTGOT)                     0x3ff4
+ 0x00000002 (PLTRELSZ)                   56 (bytes)
+ 0x00000014 (PLTREL)                     REL
+ 0x00000017 (JMPREL)                     0x4a8
+ 0x00000011 (REL)                        0x460
+ 0x00000012 (RELSZ)                      72 (bytes)
+ 0x00000013 (RELENT)                     8 (bytes)
+ 0x6ffffffb (FLAGS_1)                    Flags: PIE
+ 0x6ffffffe (VERNEED)                    0x420
+ 0x6fffffff (VERNEEDNUM)                 1
+ 0x6ffffff0 (VERSYM)                     0x404
+ 0x6ffffffa (RELCOUNT)                   4
+ 0x00000000 (NULL)                       0x0
+```
+
+
+https://unix.stackexchange.com/questions/565593/compiling-gcc-against-a-custom-built-glibc
+
 
 ## demonstrate a use after free or double free condition in the program [3]
 
