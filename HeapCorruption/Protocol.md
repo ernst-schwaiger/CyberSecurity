@@ -391,7 +391,7 @@ as an object of type `t_user_list`. `t_user_list::next` is exactly at the same p
 
 
 After the heap is prepared, one element in the user list is deleted, which at some point invokes the 
-statement `prev_element->next = element->next;` in delete_user_by_id()`. In this scenario, 
+statement `prev_element->next = element->next;` in `delete_user_by_id()`. In this scenario, 
 `prev_element->next` refers to the `session` global var (in reality: `session->logged_in_user`),
 `element` refers to the "fake" `t_user_list` entry at the beginning of "peter", and
 `element->next` refers to the `root` user chunk. Which in total amounts to `session->logged_in_user = root`.
