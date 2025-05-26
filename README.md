@@ -8,3 +8,11 @@ Exploiting vulnerable applications
 ## Stack Corruption
 
 [Protocol](./StackCorruption/Protocol.md)
+
+## Heap Corruption
+
+[Protocol](./HeapCorruption/Protocol.md)
+
+## Android Security
+
+[Protocol](./AndroidSecurity/Protocol.md)
