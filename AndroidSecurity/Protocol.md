@@ -1,15 +1,13 @@
-Student: Ernst Schwaiger
-Date 2025-05-25 - 2025-05-31
+Ernst Schwaiger
+Date 2025-05-25 - 2025-06-01
 
 # Lab + App Network Traffic Inspection/Interception Setup
 
 ## Install Lab
 Installing Lab on Native Windows 11 OS
 
-Download and install "Android Studio Meerkat Feature Drop | 2024.3.2" from https://developer.android.com/studio
-Download commandlinetools-win-13114758_latest.zip from the same website
+Download and install "Android Studio Meerkat Feature Drop | 2024.3.2" from https://developer.android.com/studio.
 
-When installing Android Studio, the Sdk Tools are installed to `C:\Users\<username>\AppData\Local\Android\Sdk`
 Add `C:\Users\<username>\AppData\Local\Android\Sdk\emulator` to PATH environment variable so that the
 Android Debug Bridge `adb` can be invoked from anywhere in a Windows command prompt.
 
@@ -86,10 +84,10 @@ public final class OkHttp {
 }
 ```
 
-The `OkHttp` is written in Kotlin, and publicly available on `https://github.com/square/okhttp`. Any further code inspection on 
-that library in that particular version will be done using the actual source code instead of the decompiled Java. 
+The `OkHttp` library is written in Kotlin, and publicly available on `https://github.com/square/okhttp`. Any further code inspection on 
+that library in that particular version was done using the actual source code instead of the decompiled Java code. 
 
-Since clients of the `OkHttp` library have to access an instance of `OkHttpClient`, the clients in the OE1 app can be found via
+Clients of the `OkHttp` library have to access an instance of `OkHttpClient`, the clients in the OE1 app can therefore be found via
 ```bash
 find sources -name "*.java" | xargs grep -il "OkHttpClient" | grep -v "okhttp3"
 sources/at/orf/android/orfaudioplayer/api/Cluboe3Kt.java
@@ -348,12 +346,14 @@ public class TtmlHelpers {
     // ...
 ```
 
+Both reported methods are only invoked internally in the mp4parser library, and none of that code is called from somewhere else, so both methods can be considered "dead code".
+
+
 In the package `at.orf.*`, containing the app code, only occurrences of 
 - `java.lang.security.audit.active-debug-code-printstacktrace.active-debug-code-printstacktrace` and 
 - `java.lang.security.audit.bad-hexa-conversion.bad-hexa-conversion` were found.
 
-The former warning relates to invocations of `e.printStackTrace();` in exception handlers, the latter one relates to the
-building of an MD5 hash value in `OrfAdParameter.java`:
+The `OrfAdParameter.md5()` function was reported for both violations. In the catch clause, the exception stack trace is written to `stderr` and an empty string is returned instead of the hash instead. Both are dangerous actions, but the catch handler would only execute if the "MD5" function was not available (it always is). The second warning relates to the building of the MD5 string value
 
 ```java
     private final String md5(String s) {
@@ -377,7 +377,7 @@ building of an MD5 hash value in `OrfAdParameter.java`:
     }
 ```
 
-which has a bug in it, since `Integer.toHexString()` will generate single digit hex strings for byte values in the range `[0x00..0x0f}`, instead of double-digit hex strings starting with `0`. This does not constitute a vulnerability since the function is only executed once on a string controlled by the application.
+which has a bug in it, since `Integer.toHexString()` will generate single digit hex strings for byte values in the range `[0x00..0x0f]`, instead of double-digit hex strings starting with `0`. This does not constitute a vulnerability since the function is only executed once on a string controlled by the application.
 
 ### Manual Grepping
 
@@ -389,7 +389,7 @@ sources/at/orf/oe1/R.java:        public static final int google_api_key = 0x7f1
 sources/at/orf/oe1/R.java:        public static final int google_crash_reporting_api_key = 0x7f14018b;
 ```
 
-It turned out that these IDs just refer to resource strings, not to actual Google API keys. Celebrated too early :-).
+It turned out that these IDs just refer to ordinary text strings, not to actual Google API keys. Celebrated too early :-).
 
 ```xml
     <!-- ... -->
@@ -479,7 +479,7 @@ Regarding the OWASP Mobile Top 10 Vulnerabilities, `https://owasp.org/www-projec
 ### 1. Improper Credential Usage
 No hard-coded credentials were found in the applications source code, unencrypted credential
 transmission was not detected when examining the exchanged traffic. The app does not provide
-a mechanism for user login, hence to weak user login is possible.
+a mechanism for user login, hence no weak user login is possible.
 
 ### 2. Inadequate Supply Chain Security
 Decompiling the app code showed lots and lots of included libraries, partly containing code which
@@ -490,7 +490,7 @@ by removing redundant libraries and/or unused code.
 Does not apply since the app does not provide authentication mechanisms.
 
 ### 4. Insufficient Input/Output Validation
-The app allows to do a full test search, when testing simple SQL and XSS injections, no irregular behavior
+The app allows to do a full text search, when testing simple SQL and XSS injections, no irregular behavior
 was observed in the app or at the host to which the search request was transmitted.
 
 ### 5. Insecure Communication
