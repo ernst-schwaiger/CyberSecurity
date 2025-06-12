@@ -309,8 +309,8 @@ length which overflows the stack completely.
 
 Rename both crash files for easier handling:
 
-[input1.txt](file:///input1.txt)
-[input2.txt](file:///input2.txt)
+[input1.txt](./input1.txt)  
+[input2.txt](./input2.txt)
 
 Bash script to run one of these two files:
 
@@ -645,14 +645,14 @@ WRITE of size 59 at 0x7f02f0900052 thread T0
 
 ### Input files and script for Afl++ crashes
 
-[input1.txt](file:///input1.txt)
-[input2.txt](file:///input2.txt)
-[crashPotato.sh](file:///crashPotato.sh)
+[input1.txt](./input1.txt)  
+[input2.txt](./input2.txt)  
+[crashPotato.sh](./crashPotato.sh)  
 
 ### Patched Source Files for LibFuzzer and crashfile
 
-[src/func.c](file:///src/func.c)
-[src/login2.c](file:///src/login2.c)
-[src/userlist.c](file:///src/userlist.c)
+[src/func.c](./src/func.c)  
+[src/login2.c](./src/login2.c)  
+[src/userlist.c](./src/userlist.c)  
 
-[crashfile](file:///crashfile)
+[crashfile](./crashfile)  
