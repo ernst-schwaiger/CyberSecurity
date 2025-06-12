@@ -103,6 +103,29 @@ clean:
 	rm -f potato
 ```
 
+On the test system, the `mmap()` call in `runr_start()` always returns `NULL` causing the process to terminate. In order to avoid this,
+the `shell` command was removed from `handle_client()`:
+
+```c
+/* ... */
+else if(strncmp(command, "logout", 6) == 0)
+{
+    if(! is_authenticated()) continue;
+    logout();
+}
+// else if(strncmp(command, "shell", 5) == 0)
+// {
+//     if(! is_authenticated()) continue;
+//     shell();
+// }
+else if(strncmp(command, "changepw", 8) == 0)
+{
+    if(! is_authenticated()) continue;
+    change_password();
+}
+/* ... */
+```
+
 Now, potato2 can be built by running `make`, `afl-clang-lto` already extracts some strings from 
 strncmp() calls it found in the source code and puts them into a dictionary:
 
@@ -499,7 +522,7 @@ check_password(t_user* user, char* password)
 }
 ```
 
-Since the fuzzer starts with an empty user list, another bug in `next_free_id()` must be fixed to avoid that a `NULL` pointer gets dereferenced:
+Also, the fuzzer starts with an empty user list, another bug in `next_free_id()` must be fixed to avoid that a `NULL` pointer gets dereferenced:
 
 ```c
 int
@@ -526,7 +549,6 @@ next_free_id() // returns a free id. does not account for gaps
      return max_id;
 }
 ```
-
 
 After these patches, `fuzz_potato` runs for a few seconds, then ASAN detects a stack buffer overflow and stops the process:
 
