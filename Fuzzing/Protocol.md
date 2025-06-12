@@ -7,6 +7,8 @@ The steps below were executed on a Ubuntu 24.04 VM on WSL2
 
 ## Install dependencies, build Afl++
 
+Install dependenciesl like outlined [here](https://github.com/AFLplusplus/AFLplusplus/blob/stable/docs/INSTALL.md), the dependencies for Nyx and Qemu mode
+were left out since not needed for this specific lab. The clang version below is "18", but that number can differ, depending on the used Linux distribution.
 
 ```bash
 sudo apt-get update
@@ -14,8 +16,6 @@ sudo apt-get install -y build-essential python3-dev automake cmake git flex biso
 # try to install llvm 18 and install the distro default if that fails
 sudo apt-get install -y lld-18 llvm-18 llvm-18-dev clang-18 || sudo apt-get install -y lld llvm llvm-dev clang
 sudo apt-get install -y gcc-$(gcc --version|head -n1|sed 's/\..*//'|sed 's/.* //')-plugin-dev libstdc++-$(gcc --version|head -n1|sed 's/\..*//'|sed 's/.* //')-dev
-sudo apt-get install -y ninja-build # for QEMU mode
-sudo apt-get install -y cpio libcapstone-dev # for Nyx mode
 git clone https://github.com/AFLplusplus/AFLplusplus
 cd AFLplusplus
 make all
@@ -103,8 +103,8 @@ clean:
 	rm -f potato
 ```
 
-On the test system, the `mmap()` call in `runr_start()` always returns `NULL` causing the process to terminate. In order to avoid this,
-the `shell` command was removed from `handle_client()`:
+On the test system, the `mmap()` call in `runr_start()` always returns `NULL` causing the process to terminate whenever the `shell` command
+is executed. In order to avoid this, that command was removed from `handle_client()`:
 
 ```c
 /* ... */
@@ -475,8 +475,9 @@ The implementation above uses `fmemopen()` to create a memory file handle, and r
 `doFuzz()` does the actual fuzzing by running `handle_client()` (and `purge_list()` to avoid leaking
 memory). `make` now additionally builds `fuzz_potato`, which can be called directly.
 
-LibFuzzer stops at the first occurrence of an error, the first ones it correctly detects are the leaking
-calls to `str2md5()`, which must be fixed before the buffer overflow vulnerabilities can be detected:
+LibFuzzer stops immediately if it detects an error. That error needs to be fixed and the fuzzer re-run
+until no additional crashes are detected for a longer period of time. The first problem LibFuzzer detected
+on the test system  are the leaking calls to `str2md5()`. They are fixed by patching the respective functions:
 
 ```c
 void
@@ -522,7 +523,7 @@ check_password(t_user* user, char* password)
 }
 ```
 
-Also, the fuzzer starts with an empty user list, another bug in `next_free_id()` must be fixed to avoid that a `NULL` pointer gets dereferenced:
+The fuzzer also starts with an empty user list, another bug in `next_free_id()` reveals a missing `NULL` pointer check which is added here:
 
 ```c
 int
