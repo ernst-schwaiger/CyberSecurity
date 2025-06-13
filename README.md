@@ -16,3 +16,7 @@ Exploiting vulnerable applications
 ## Android Security
 
 [Protocol](./AndroidSecurity/Protocol.md)
+
+## Fuzzing
+
+[Protocol](./Fuzzing/Protocol.md)
