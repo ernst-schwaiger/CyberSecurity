@@ -8,7 +8,7 @@ The steps below were executed on a Ubuntu 24.04 VM on WSL2
 ## Install dependencies, build Afl++
 
 Install dependenciesl like outlined [here](https://github.com/AFLplusplus/AFLplusplus/blob/stable/docs/INSTALL.md), the dependencies for Nyx and Qemu mode
-were left out since not needed for this specific lab. The clang version below is "18", but that number can differ, depending on the used Linux distribution.
+were left out as they are not needed for this specific lab. The clang version below is "18", but that number can differ, depending on the used Linux distribution.
 
 ```bash
 sudo apt-get update
@@ -225,7 +225,7 @@ which should now show the status page on the terminal. After a few minutes, `Afl
 
 Letting `Afl++` run for a little longer will yield crashes after a 15 to 20 minutes.
 Running it even longer will yield more than 20 crashes, like shown below. The fuzzing
-process can be stopped by issuing `Ctrl-C`:
+process can be stopped by pressing `Ctrl-C`:
 
 ![Afl++](./Afl++.png)
 
