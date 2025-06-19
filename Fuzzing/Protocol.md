@@ -442,7 +442,7 @@ clean:
 	rm -f potato fuzz_potato
 ```
 
-In the second step, `main.c` needs to be patched to enable fuzzing:
+In the second step, `main.c` needs a patch to work with LibFuzzer:
 
 ```c
 #ifndef LIBFUZZER
@@ -570,47 +570,45 @@ After these patches, `fuzz_potato` runs for a few seconds, then ASAN detects a s
 
 ```bash
 =================================================================
-==16514==ERROR: AddressSanitizer: stack-buffer-overflow on address 0x7efc66e29c52 at pc 0x562ae81d58e9 bp 0x7ffce1ab38e0 sp 0x7ffce1ab3070
-WRITE of size 59 at 0x7efc66e29c52 thread T0
-    #0 0x562ae81d58e8 in scanf_common(void*, int, bool, char const*, __va_list_tag*) asan_interceptors.cpp.o
-    #1 0x562ae81d69a9 in __isoc23_fscanf (/home/ernst/projects/CyberSecurity/potato2/fuzz_potato+0x8d9a9) (BuildId: a204a87f0e70f82a0d057b0b5fb021573dae5cd9)
-    #2 0x562ae8290442 in change_name /home/ernst/projects/CyberSecurity/potato2/src/func.c:187:5
-    #3 0x562ae828bdc9 in handle_client /home/ernst/projects/CyberSecurity/potato2/src/main.c:124:13
-    #4 0x562ae828c1e9 in doFuzz /home/ernst/projects/CyberSecurity/potato2/src/main.c:212:5
-    #5 0x562ae828c119 in LLVMFuzzerTestOneInput /home/ernst/projects/CyberSecurity/potato2/src/main.c:245:9
-    #6 0x562ae8198e04 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) (/home/ernst/projects/CyberSecurity/potato2/fuzz_potato+0x4fe04) (BuildId: a204a87f0e70f82a0d057b0b5fb021573dae5cd9)
-    #7 0x562ae81984f9 in fuzzer::Fuzzer::RunOne(unsigned char const*, unsigned long, bool, fuzzer::InputInfo*, bool, bool*) (/home/ernst/projects/CyberSecurity/potato2/fuzz_potato+0x4f4f9) (BuildId: a204a87f0e70f82a0d057b0b5fb021573dae5cd9)
-    #8 0x562ae8199ce5 in fuzzer::Fuzzer::MutateAndTestOne() (/home/ernst/projects/CyberSecurity/potato2/fuzz_potato+0x50ce5) (BuildId: a204a87f0e70f82a0d057b0b5fb021573dae5cd9)
-    #9 0x562ae819a845 in fuzzer::Fuzzer::Loop(std::vector<fuzzer::SizedFile, std::allocator<fuzzer::SizedFile>>&) (/home/ernst/projects/CyberSecurity/potato2/fuzz_potato+0x51845) (BuildId: a204a87f0e70f82a0d057b0b5fb021573dae5cd9)
-    #10 0x562ae8187b1f in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) (/home/ernst/projects/CyberSecurity/potato2/fuzz_potato+0x3eb1f) (BuildId: a204a87f0e70f82a0d057b0b5fb021573dae5cd9)
-    #11 0x562ae81b21a6 in main (/home/ernst/projects/CyberSecurity/potato2/fuzz_potato+0x691a6) (BuildId: a204a87f0e70f82a0d057b0b5fb021573dae5cd9)
-    #12 0x7efc68b791c9 in __libc_start_call_main csu/../sysdeps/nptl/libc_start_call_main.h:58:16
-    #13 0x7efc68b7928a in __libc_start_main csu/../csu/libc-start.c:360:3
-    #14 0x562ae817cb04 in _start (/home/ernst/projects/CyberSecurity/potato2/fuzz_potato+0x33b04) (BuildId: a204a87f0e70f82a0d057b0b5fb021573dae5cd9)
+==443242==ERROR: AddressSanitizer: stack-buffer-overflow on address 0x7efe6e600052 at pc 0x55966ff488e9 bp 0x7fffb91d1a60 sp 0x7fffb91d11f0
+WRITE of size 68 at 0x7efe6e600052 thread T0
+    #0 0x55966ff488e8 in scanf_common(void*, int, bool, char const*, __va_list_tag*) asan_interceptors.cpp.o
+    #1 0x55966ff499a9 in __isoc23_fscanf (/home/ernst/projects/CyberSecurity/potato2/fuzz_potato+0x8d9a9) (BuildId: 14a6970b6fa305c3d5883cc3169207125ade1960)
+    #2 0x559670003512 in change_name /home/ernst/projects/CyberSecurity/potato2/src/func.c:203:5
+    #3 0x55966fffedc9 in handle_client /home/ernst/projects/CyberSecurity/potato2/src/main.c:124:13
+    #4 0x55966ffff1e9 in doFuzz /home/ernst/projects/CyberSecurity/potato2/src/main.c:212:5
+    #5 0x55966ffff119 in LLVMFuzzerTestOneInput /home/ernst/projects/CyberSecurity/potato2/src/main.c:245:9
+    #6 0x55966ff0be04 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) (/home/ernst/projects/CyberSecurity/potato2/fuzz_potato+0x4fe04) (BuildId: 14a6970b6fa305c3d5883cc3169207125ade1960)
+    #7 0x55966fef4f36 in fuzzer::RunOneTest(fuzzer::Fuzzer*, char const*, unsigned long) (/home/ernst/projects/CyberSecurity/potato2/fuzz_potato+0x38f36) (BuildId: 14a6970b6fa305c3d5883cc3169207125ade1960)
+    #8 0x55966fefa9ea in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) (/home/ernst/projects/CyberSecurity/potato2/fuzz_potato+0x3e9ea) (BuildId: 14a6970b6fa305c3d5883cc3169207125ade1960)
+    #9 0x55966ff251a6 in main (/home/ernst/projects/CyberSecurity/potato2/fuzz_potato+0x691a6) (BuildId: 14a6970b6fa305c3d5883cc3169207125ade1960)
+    #10 0x7efe703061c9 in __libc_start_call_main csu/../sysdeps/nptl/libc_start_call_main.h:58:16
+    #11 0x7efe7030628a in __libc_start_main csu/../csu/libc-start.c:360:3
+    #12 0x55966feefb04 in _start (/home/ernst/projects/CyberSecurity/potato2/fuzz_potato+0x33b04) (BuildId: 14a6970b6fa305c3d5883cc3169207125ade1960)
 
-Address 0x7efc66e29c52 is located in stack of thread T0 at offset 82 in frame
-    #0 0x562ae82902bf in change_name /home/ernst/projects/CyberSecurity/potato2/src/func.c:182
+Address 0x7efe6e600052 is located in stack of thread T0 at offset 82 in frame
+    #0 0x55967000338f in change_name /home/ernst/projects/CyberSecurity/potato2/src/func.c:198
 
   This frame has 1 object(s):
-    [32, 82) 'input_username' (line 183) <== Memory access at offset 82 overflows this variable
+    [32, 82) 'input_username' (line 199) <== Memory access at offset 82 overflows this variable
 HINT: this may be a false positive if your program uses some custom stack unwind mechanism, swapcontext or vfork
       (longjmp and C++ exceptions *are* supported)
 SUMMARY: AddressSanitizer: stack-buffer-overflow asan_interceptors.cpp.o in scanf_common(void*, int, bool, char const*, __va_list_tag*)
 Shadow bytes around the buggy address:
-  0x7efc66e29980: f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5
-  0x7efc66e29a00: f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5
-  0x7efc66e29a80: f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5
-  0x7efc66e29b00: f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5
-  0x7efc66e29b80: f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5 f5
-=>0x7efc66e29c00: f1 f1 f1 f1 00 00 00 00 00 00[02]f3 f3 f3 f3 f3
-  0x7efc66e29c80: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
-  0x7efc66e29d00: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
-  0x7efc66e29d80: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
-  0x7efc66e29e00: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
-  0x7efc66e29e80: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x7efe6e5ffd80: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x7efe6e5ffe00: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x7efe6e5ffe80: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x7efe6e5fff00: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x7efe6e5fff80: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+=>0x7efe6e600000: f1 f1 f1 f1 00 00 00 00 00 00[02]f3 f3 f3 f3 f3
+  0x7efe6e600080: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x7efe6e600100: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x7efe6e600180: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x7efe6e600200: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+  0x7efe6e600280: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
 Shadow byte legend (one shadow byte represents 8 application bytes):
   Addressable:           00
-  Partially addressable: 01 02 03 04 05 06 07 
+  Partially addressable: 01 02 03 04 05 06 07
   Heap left redzone:       fa
   Freed heap region:       fd
   Stack left redzone:      f1
@@ -627,12 +625,7 @@ Shadow byte legend (one shadow byte represents 8 application bytes):
   ASan internal:           fe
   Left alloca redzone:     ca
   Right alloca redzone:    cb
-==16514==ABORTING
-MS: 2 ChangeByte-InsertRepeatedBytes-; base unit: 60f7def47317412f91f9b150921b672159d6fa33
-0x30,0xa,0x70,0x6f,0x67,0x6f,0x75,0x74,0xa,0x6f,0x67,0x0,0x0,0x10,0x0,0xa,0x39,0x74,0x6c,0x0,0x72,0xa,0x6c,0x69,0x6f,0x67,0x6e,0x73,0x74,0xa,0xa,0xa,0x65,0x65,0x67,0x67,0xa,0x72,0x65,0x67,0x69,0x73,0x74,0x65,0x72,0xa,0xa,0x8d,0x74,0xa,0xa,0x8d,0x74,0x10,0xa,0x6c,0x6f,0x67,0x69,0x10,0xa,0x6c,0x6f,0x67,0x69,0x6e,0x73,0x74,0xa,0xa,0xa,0x9b,0xa1,0x67,0x6f,0x75,0xa,0x63,0x68,0x61,0x6e,0x67,0x65,0x6e,0x61,0x6d,0x65,0x74,0x6c,0x6f,0x67,0x6f,0x75,0x75,0x74,0xa,0x8d,0x74,0x10,0xe3,0xe3,0xe3,0xe3,0xe3,0xe3,0xe3,0xe3,0xe3,0xe3,0xe3,0xe3,0xe3,0xe3,0xe3,0xe3,0xe3,0xe3,0xe3,0xe3,0xe3,0xe3,0xe3,0xe3,0xe3,0xe3,0xe3,0xe3,0xe3,0xe3,0xe3,0xe3,0xe3,0xe3,0xe3,0xe3,0xe3,0xe3,0xe3,0xe3,0xe3,0xe3,0xe3,0xe3,0xe3,0xe3,0xe3,0xe3,0xe3,0xe3,0xe3,0xe3,0xe3,0xe3,0xe3,0xa,0x72,0x6c,0x67,0xa,0x72,0x75,0xa,0x63,0x68,0x61,0x6e,0x67,0x65,0x6e,0x61,0x6d,0x65,0x65,
-0\012pogout\012og\000\000\020\000\0129tl\000r\012liognst\012\012\012eegg\012register\012\012\215t\012\012\215t\020\012logi\020\012loginst\012\012\012\233\241gou\012changenametlogouut\012\215t\020\343\343\343\343\343\343\343\343\343\343\343\343\343\343\343\343\343\343\343\343\343\343\343\343\343\343\343\343\343\343\343\343\343\343\343\343\343\343\343\343\343\343\343\343\343\343\343\343\343\343\343\343\343\343\343\012rlg\012ru\012changenamee
-artifact_prefix='./'; Test unit written to ./crash-8cbb3a75d2d1d43b8270abeb9570046420ca702d
-Base64: MApwb2dvdXQKb2cAABAACjl0bAByCmxpb2duc3QKCgplZWdnCnJlZ2lzdGVyCgqNdAoKjXQQCmxvZ2kQCmxvZ2luc3QKCgqboWdvdQpjaGFuZ2VuYW1ldGxvZ291dXQKjXQQ4+Pj4+Pj4+Pj4+Pj4+Pj4+Pj4+Pj4+Pj4+Pj4+Pj4+Pj4+Pj4+Pj4+Pj4+Pj4+Pj4+Pj4+Pj4wpybGcKcnUKY2hhbmdlbmFtZWU=
+==443242==ABORTING
 ```
 
 As expected, the overflow happens in `change_name()`, and the stack buffer that got overflown was `input_username`.
