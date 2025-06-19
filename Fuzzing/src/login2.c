@@ -62,7 +62,7 @@ check_password(t_user* user, char* password)
     char *md5 = str2md5(password, strlen(password));
     int ret = strncmp(user->password_hash, md5, 32);
     free(md5);
-    return ret;
+    return (0 == ret);
 }
 
 void

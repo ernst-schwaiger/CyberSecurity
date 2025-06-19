@@ -6,10 +6,10 @@
 #include <string.h>
 #include <time.h>
 #include <sys/wait.h>
+#include <assert.h>
 
 #include "userlist.h"
 #include "runr.h"
-
 
 struct _session
 {
@@ -143,6 +143,22 @@ login()
     fputs("username: ", stdout); fflush(stdout);
     fgets(input_username, USERNAME_LENGTH, stdin);
     input_username[strcspn(input_username, "\n")] = 0x00;
+
+    // Injected additional crash, add #include <assert.h> at the beginning
+    // of func.c
+    if (input_username[0] == 'f')
+    {
+        if (input_username[1] == 'o')
+        {
+            if (input_username[2] == 'o')
+            {
+                assert(0);
+            }
+        }
+
+    }
+    // Injected additional crash
+
     // if terminal
     //input_password = getpass("Password: "); fflush(stdout);
     fputs("password: ", stdout); fflush(stdout);

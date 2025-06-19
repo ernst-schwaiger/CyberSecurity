@@ -7,7 +7,7 @@ The steps below were executed on a Ubuntu 24.04 VM on WSL2
 
 ## Install dependencies, build Afl++
 
-Install dependenciesl like outlined [here](https://github.com/AFLplusplus/AFLplusplus/blob/stable/docs/INSTALL.md), the dependencies for Nyx and Qemu mode
+Install dependencies like outlined [here](https://github.com/AFLplusplus/AFLplusplus/blob/stable/docs/INSTALL.md), the dependencies for Nyx and Qemu mode
 were left out as they are not needed for this specific lab. The clang version below is "18", but that number can differ, depending on the used Linux distribution.
 
 ```bash
@@ -42,7 +42,9 @@ In the last step, checkout the potato sources
 git clone https://github.com/edgecase1/potato2.git
 ```
 
-## Run Afl++ to find crashes in `potato`
+##  Identify two inputs that trigger a crash or undefined behavior using a fuzzing technique
+
+This section used Afl++ to find crashes in `potato`
 
 In the `potato2` folder, create a Makefile for building potato and for fuzzing it using `Afl++`.
 Instead of `gcc` or `clang` it is using one of the `Afl++` compilers, e.g. `afl-clang-lto`. These
@@ -103,6 +105,8 @@ clean:
 	rm -f potato
 ```
 
+### Patch and inject an additional "crash" into `potato`
+
 On the test system, the `mmap()` call in `runr_start()` always returns `NULL` causing the process to terminate whenever the `shell` command
 is executed. In order to avoid this, that command was removed from `handle_client()`:
 
@@ -124,6 +128,42 @@ else if(strncmp(command, "changepw", 8) == 0)
     change_password();
 }
 /* ... */
+```
+
+In addition to the buffer overflow that was identified and eploited in the previous sessions,
+an additional crashing code is inserted into the `potato` project. This code will terminate
+the application if a login is tried with a username starting with the string `foo`:
+
+```c
+void
+login()
+{
+    char input_username[USERNAME_LENGTH];
+    //char* input_password;
+    char input_password[PASSWORD_LENGTH];
+    t_user* user;
+
+    fputs("Welcome!\n", stdout);
+    fputs("username: ", stdout); fflush(stdout);
+    fgets(input_username, USERNAME_LENGTH, stdin);
+    input_username[strcspn(input_username, "\n")] = 0x00;
+
+    // Injected additional crash, add #include <assert.h> at the beginning
+    // of func.c
+    if (input_username[0] == 'f')
+    {
+        if (input_username[1] == 'o')
+        {
+            if (input_username[2] == 'o')
+            {
+                assert(0);
+            }
+        }
+
+    }
+    // End Injected additional crash 
+    /* ... */
+
 ```
 
 Now, potato2 can be built by running `make`, `afl-clang-lto` already extracts some strings from 
@@ -263,13 +303,7 @@ hexdump -C out/default/crashes/id\:000000\,sig\:11\,src\:000075\,time\:600548\,e
 000000dd
 ```
 
-Running `potato` in a debugger using the file as input reveals that the issue is caused
-by an empty `userlist` file. One or more test cases in `Afl++` caused the file to be
-emptied, which in turn causes a crash whenever a user tries to register. The userlist
-head is `NULL` and a segfault is thrown when `potato` tries to reference it.
-
-Restoring the `userlist` from git, then re-running the test in the debugger, reveals that
-the input still causes a segfault, albeit at a different place:
+Running the test in the debugger reveals that causes a segfault:
 
 ![Afl++](./Afl++DebugCrash1.png)
 
@@ -280,53 +314,34 @@ returns to the caller, `handle_client()`, but this function has its stack frame 
 overwritten to an invalid address, causing a crash when accessing the local variable
 `command[]`.
 
-Examining the second file: `out/default/crashes/id:000002,sig:11,src:000145,time:601783,execs:1407855,op:havoc,rep:14`
+The second file  `out/default/crashes/id:000002,sig:11,src:000145,time:601783,execs:1407855,op:havoc,rep:14` triggers the inserted `assert(0)`:
 
 ```bash
-hexdump -C `out/default/crashes/id:000002,sig:11,src:000145,time:601783,execs:1407855,op:havoc,rep:14`
-00000000  6c 6f 67 8b 8b 0a 72 65  67 69 73 74 65 72 6c 6f  |log...registerlo|
-00000010  0a 0a 0a 63 80 65 0a 6c  6f 67 69 6e e5 0a 0a 0a  |...c.e.login....|
-00000020  70 0a 64 65 62 75 67 0a  5d 70 0a 64 65 62 75 67  |p.debug.]p.debug|
-00000030  6b 0a 82 65 6c 65 74 65  0a 2c 0a ff ff ff 80 64  |k..elete.,.....d|
-00000040  65 6c 65 74 65 54 6b 0a  64 65 6c 65 74 43 62 75  |eleteTk.deletCbu|
-00000050  6e ff 64 65 6c 65 74 65  3d 6b 0a 64 65 6c 65 74  |n.delete=k.delet|
-00000060  65 0a 2c 0a 2c 0a 64 0a  64 52 52 52 52 52 52 52  |e.,.,.d.dRRRRRRR|
-00000070  52 52 52 52 52 52 52 52  52 52 52 52 52 52 52 52  |RRRRRRRRRRRRRRRR|
-*
-00001f70  52 52 52 52 52 52 52 3e  52 52 52 52 52 52 52 52  |RRRRRRR>RRRRRRRR|
-00001f80  52 52 52 52 52 52 52 52  52 52 52 52 52 52 52 52  |RRRRRRRRRRRRRRRR|
-*
-00002020  52 52 52 52 52 52 52 52  52 52 52 74 65 6e 52 52  |RRRRRRRRRRRtenRR|
-00002030  52 52 52 52 52 52 52 52  52 52 52 52 52 52 52 52  |RRRRRRRRRRRRRRRR|
-*
-00002d20  52 52 52 52 52 52 52 52  ff ff 52 52 52 52 52 52  |RRRRRRRR..RRRRRR|
-00002d30  52 52 52 52 52 52 52 52  52 52 52 52 52 52 52 52  |RRRRRRRRRRRRRRRR|
-*
-00003630  52 52 52 52 52 52 52 0a  72 65 61 64 0a 72 65 61  |RRRRRRR.read.rea|
-00003640  64 f2 69 1f 0a 63 68 61  6e 67 65 70 77 0a 0a 1f  |d.i..changepw...|
-00003650  0a 63 68 61 6e 67 65 70  77 73 6f 67 6c 0a 70 0a  |.changepwsogl.p.|
-00003660  64 65 62 75 67 0a 6c 70  0a 64 65 62 75 67 0a 0a  |debug.lp.debug..|
-00003670  0a 1f 0a 63 68 61 6e 67  65 70 77 0a 0a 1f 0a 63  |...changepw....c|
-00003680  68 61 6e 67 65 70 77 73  6f 0a 6c 6f 0a 0a 0a 0a  |hangepwso.lo....|
-00003690  0a 63 68 61 6e 67 65 6e  61 6d 65 6c 52 52 52 52  |.changenamelRRRR|
-000036a0  52 52 52 52 52 52 52 52  52 52 52 52 52 52 52 52  |RRRRRRRRRRRRRRRR|
-*
-00004380  52 52 52 52 52 52 62 52  52 52 52 52 52 52 52 52  |RRRRRRbRRRRRRRRR|
-00004390  52 52 52 52 52 52 52 52  52 52 52 52 52 52 52 52  |RRRRRRRRRRRRRRRR|
-*
-000050a0  52 52 52 52 52 52 52 52  52 52 52 52 2f 52 52 52  |RRRRRRRRRRRR/RRR|
-000050b0  52 52 52 52 52 52 52 52  52 52 52 52 52 52 52 52  |RRRRRRRRRRRRRRRR|
-*
-00006140  52 52 52 52 52 52 65 6c  65 74 65 54 6b 0a 64 65  |RRRRRReleteTk.de|
-00006150  6c 65 91 65 0a 2c 0a 0a  0a 64 65 6c 65 74 65 0a  |le.e.,...delete.|
-00006160  0a                                                |.|
-00006161
+./potato console < out/default/crashes/id\:000009\,sig\:06\,src\:000100\,time\:306636\,execs\:730933\,op\:havoc\,rep\:3
+starting up (pid 403318)
+reading file userlist
+handle_client
+cmd> What is the name > Password: User added.
+cmd> Welcome!
+username: potato: src/func.c:155: void login(): Assertion `0' failed.
 ```
 
-which crashes the app directly in `change_name()` by passing a string in 3k
-length which overflows the stack completely.
+Examining its content:
 
-![Afl++](./Afl++DebugCrash1.png)
+```bash
+hexdump -C out/default/crashes/id\:000009\,sig\:06\,src\:000100\,time\:306636\,execs\:730933\,op\:havoc\,rep\:3
+00000000  72 65 67 69 73 74 65 72  0a f5 0a 0a 6c 6f 67 69  |register....logi|
+00000010  6e 72 64 63 0a 66 6f 6f  67 6e 0a 64 65 6c 65 74  |nrdc.foogn.delet|
+00000020  65 0a 0a 6e 0a 64 65 6c  65 74 65 6f 0a 6c 69 73  |e..n.deleteo.lis|
+00000030  0a 72 6e 0a 0a 0a 0a 6c  6f 67 69 6e 0a 0a 0a 00  |.rn....login....|
+00000040  09 0a 0a 0a 0a 6c 69 73  74 09 0a 0a 0a           |.....list....|
+0000004d
+```
+
+The "foogn" user name can be found after the "loginrdc" command (the "...rdc" suffix is ignored by the potato input
+handler). The program execution reaches the `assert()` statement and terminates the process:
+
+![Afl++](./Afl++DebugCrash2.png)
 
 ## Prepare a command line or script + file to run the input against the vulnerable program
 
@@ -361,9 +376,9 @@ else
 fi
 ```
 
-## use sanitizers or assertions to identify another vulnerabiltiy
+## Use sanitizers or assertions to identify another vulnerabiltiy
 
-FIXME: Maybe empty the users list, run the register function?
+Done in conjunction with LibFuzzer in the next section
 
 ## Use Libfuzzer to fuzz a vulnerable function
 
@@ -470,7 +485,7 @@ int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size)
 ```
 
 LibFuzzer expects an implementation of `int LLVMFuzzerTestOneInput(const uint8_t *Data, size_t Size)`,
-where it passes the fuzz data via `Data` and `Size`. The function is expected to return `0` in all cases.
+where it passes the fuzz data via `Data` and `Size`.
 The implementation above uses `fmemopen()` to create a memory file handle, and replaces `stdin` by it.
 `doFuzz()` does the actual fuzzing by running `handle_client()` (and `purge_list()` to avoid leaking
 memory). `make` now additionally builds `fuzz_potato`, which can be called directly.
@@ -519,7 +534,7 @@ check_password(t_user* user, char* password)
     char *md5 = str2md5(password, strlen(password));
     int ret = strncmp(user->password_hash, md5, 32);
     free(md5);
-    return ret;
+    return (0 == ret);
 }
 ```
 
@@ -626,43 +641,114 @@ it from doing that. The ASAN error message contains a Base64 encoding of the dat
 can be used to create a crashfile by hand:
 
 ```bash
-echo "MApwb2dvdXQKb2cAABAACjl0bAByCmxpb2duc3QKCgplZWdnCnJlZ2lzdGVyCgqNdAoKjXQQCmxvZ2kQCmxvZ2luc3QKCgqboWdvdQpjaGFuZ2VuYW1ldGxvZ291dXQKjXQQ4+Pj4+Pj4+Pj4+Pj4+Pj4+Pj4+Pj4+Pj4+Pj4+Pj4+Pj4+Pj4+Pj4+Pj4+Pj4+Pj4+Pj4+Pj4wpybGcKcnUKY2hhbmdlbmFtZWU=" | base64 -d > crashfile
+echo "CgoKCnJlZ2lzdGVyAAoKCggKCmxvZ2lubWkKCgoKcgoKY2hhbmdlbmFtZWz/////////////ra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2tra2trQIAra2t//8ACmxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbGxsbEoK" | base64 -d > crashfile
 hexdump -C crashfile
-00000000  30 0a 70 6f 67 6f 75 74  0a 6f 67 00 00 10 00 0a  |0.pogout.og.....|
-00000010  39 74 6c 00 72 0a 6c 69  6f 67 6e 73 74 0a 0a 0a  |9tl.r.liognst...|
-00000020  65 65 67 67 0a 72 65 67  69 73 74 65 72 0a 0a 8d  |eegg.register...|
-00000030  74 0a 0a 8d 74 10 0a 6c  6f 67 69 10 0a 6c 6f 67  |t...t..logi..log|
-00000040  69 6e 73 74 0a 0a 0a 9b  a1 67 6f 75 0a 63 68 61  |inst.....gou.cha|
-00000050  6e 67 65 6e 61 6d 65 74  6c 6f 67 6f 75 75 74 0a  |ngenametlogouut.|
-00000060  8d 74 10 e3 e3 e3 e3 e3  e3 e3 e3 e3 e3 e3 e3 e3  |.t..............|
-00000070  e3 e3 e3 e3 e3 e3 e3 e3  e3 e3 e3 e3 e3 e3 e3 e3  |................|
+00000000  0a 0a 0a 0a 72 65 67 69  73 74 65 72 00 0a 0a 0a  |....register....|
+00000010  08 0a 0a 6c 6f 67 69 6e  6d 69 0a 0a 0a 0a 72 0a  |...loginmi....r.|
+00000020  0a 63 68 61 6e 67 65 6e  61 6d 65 6c ff ff ff ff  |.changenamel....|
+00000030  ff ff ff ff ff ff ad ad  ad ad ad ad ad ad ad ad  |................|
+00000040  ad ad ad ad ad ad ad ad  ad ad ad ad ad ad ad ad  |................|
 *
-00000090  e3 e3 e3 e3 e3 e3 e3 e3  e3 e3 0a 72 6c 67 0a 72  |...........rlg.r|
-000000a0  75 0a 63 68 61 6e 67 65  6e 61 6d 65 65           |u.changenamee|
-000000ad
+00000060  ad ad ad ad 02 00 ad ad  ad ff ff 00 0a 6c 6c 6c  |.............lll|
+00000070  6c 6c 6c 6c 6c 6c 6c 6c  6c 6c 6c 6c 6c 6c 6c 6c  |llllllllllllllll|
+*
+000000a0  6c 6c 6c 6c 6c 6c 6c 6c  6c 6c 6c 6c 6c 6c 6c 4a  |lllllllllllllllJ|
+000000b0  0a                                                |.|
+000000b1
 ```
 
 LibFuzzer binaries accept an input file as first parameter, so the crash can be reproduced by passing the crashfile:
 
 ```bash
 ./fuzz_potato crashfile
-Type 'help' to print the usage.cmd> 
+INFO: Running with entropic power schedule (0xFF, 100).
+INFO: Seed: 1967178769
+INFO: Loaded 1 modules   (165 inline 8-bit counters): 165 [0x5560043fd020, 0x5560043fd0c5),
+INFO: Loaded 1 PC tables (165 PCs): 165 [0x5560043fd0c8,0x5560043fdb18),
+./fuzz_potato: Running 1 inputs 1 time(s) each.
+Running: crashfile
+handle_client
+Type 'help' to print the usage.cmd>
+Type 'help' to print the usage.cmd>
+Type 'help' to print the usage.cmd>
+Type 'help' to print the usage.cmd>
 cmd> What is the name > Password: User added.
-Type 'help' to print the usage.cmd> 
-Type 'help' to print the usage.cmd> 
-Type 'help' to print the usage.cmd> 
+Type 'help' to print the usage.cmd>
+Type 'help' to print the usage.cmd>
 cmd> Welcome!
 username: password: searching for user ...
 checking password ...
 You are authorized.
 
-Type 'help' to print the usage.cmd> 
+Type 'help' to print the usage.cmd>
+Type 'help' to print the usage.cmd>
+Type 'help' to print the usage.cmd>
 =================================================================
-==25830==ERROR: AddressSanitizer: stack-buffer-overflow on address 0x7f02f0900052 at pc 0x5595978a48e9 bp 0x7ffefecaa9a0 sp 0x7ffefecaa130
-WRITE of size 59 at 0x7f02f0900052 thread T0
+==411624==ERROR: AddressSanitizer: stack-buffer-overflow on address 0x7fe2db900052 at pc 0x5560042f88e9 bp 0x7fff5a7569a0 sp 0x7fff5a756130
+WRITE of size 68 at 0x7fe2db900052 thread T0
 ...
 ==25830==ABORTING
 ```
+
+Before searching for the assertion, the buffer overflow in `change_name()` must be fixed, as LibFuzzer immedately stops at the first encountered crash.
+Comment-out the `fscanf()` and comment-in `fgets()` to get rid of the buffer overflow:
+
+```c
+void
+change_name()
+{
+    char input_username[USERNAME_LENGTH];
+        
+    fprintf(stdout, "What is the name > ");
+    fgets(input_username, sizeof(input_username), stdin);
+    //fscanf(stdin, "%s", input_username); // TODO security
+    input_username[strcspn(input_username, "\n")] = 0x00; // terminator instead of a newline
+
+    strncpy(session.logged_in_user->name, input_username, strlen(input_username)+1);
+    fprintf(stdout, "Name changed.\n");
+}
+```
+
+After recompilation, `./fuzz_potato crashfile` does not crash any more. Running `./fuzz_potato` without parameters is considerably slowed down
+by the verbose output on `stdout` and `stderr`. Re-running `./fuzz_potato -close_fd_mask=3` removes the output and after a few seconds shows
+the expected stack trace:
+
+```bash
+==420323== ERROR: libFuzzer: deadly signal
+    #0 0x562435709c95 in __sanitizer_print_stack_trace (/home/ernst/projects/CyberSecurity/potato2/fuzz_potato+0x10ec95) (BuildId: 76b93b3e5f27a1b94d101c08274bb819ce9105bd)
+    #1 0x5624356637ac in fuzzer::PrintStackTrace() (/home/ernst/projects/CyberSecurity/potato2/fuzz_potato+0x687ac) (BuildId: 76b93b3e5f27a1b94d101c08274bb819ce9105bd)
+    #2 0x562435649837 in fuzzer::Fuzzer::CrashCallback() (/home/ernst/projects/CyberSecurity/potato2/fuzz_potato+0x4e837) (BuildId: 76b93b3e5f27a1b94d101c08274bb819ce9105bd)
+    #3 0x7fe14232d32f  (/lib/x86_64-linux-gnu/libc.so.6+0x4532f) (BuildId: 42c84c92e6f98126b3e2230ebfdead22c235b667)
+    #4 0x7fe142386b2b in __pthread_kill_implementation nptl/pthread_kill.c:43:17
+    #5 0x7fe142386b2b in __pthread_kill_internal nptl/pthread_kill.c:78:10
+    #6 0x7fe142386b2b in pthread_kill nptl/pthread_kill.c:89:10
+    #7 0x7fe14232d27d in raise signal/../sysdeps/posix/raise.c:26:13
+    #8 0x7fe1423108fe in abort stdlib/abort.c:79:7
+    #9 0x7fe14231081a in __assert_fail_base assert/assert.c:96:3
+    #10 0x7fe142323516 in __assert_fail assert/assert.c:105:3
+    #11 0x562435741fa9 in login /home/ernst/projects/CyberSecurity/potato2/src/func.c:155:17
+    #12 0x56243573dc8b in handle_client /home/ernst/projects/CyberSecurity/potato2/src/main.c:104:13
+    #13 0x56243573e1e9 in doFuzz /home/ernst/projects/CyberSecurity/potato2/src/main.c:212:5
+    #14 0x56243573e119 in LLVMFuzzerTestOneInput /home/ernst/projects/CyberSecurity/potato2/src/main.c:245:9
+    #15 0x56243564ae04 in fuzzer::Fuzzer::ExecuteCallback(unsigned char const*, unsigned long) (/home/ernst/projects/CyberSecurity/potato2/fuzz_potato+0x4fe04) (BuildId: 76b93b3e5f27a1b94d101c08274bb819ce9105bd)
+    #16 0x56243564a4f9 in fuzzer::Fuzzer::RunOne(unsigned char const*, unsigned long, bool, fuzzer::InputInfo*, bool, bool*) (/home/ernst/projects/CyberSecurity/potato2/fuzz_potato+0x4f4f9) (BuildId: 76b93b3e5f27a1b94d101c08274bb819ce9105bd)
+    #17 0x56243564bce5 in fuzzer::Fuzzer::MutateAndTestOne() (/home/ernst/projects/CyberSecurity/potato2/fuzz_potato+0x50ce5) (BuildId: 76b93b3e5f27a1b94d101c08274bb819ce9105bd)
+    #18 0x56243564c845 in fuzzer::Fuzzer::Loop(std::vector<fuzzer::SizedFile, std::allocator<fuzzer::SizedFile>>&) (/home/ernst/projects/CyberSecurity/potato2/fuzz_potato+0x51845) (BuildId: 76b93b3e5f27a1b94d101c08274bb819ce9105bd)
+    #19 0x562435639b1f in fuzzer::FuzzerDriver(int*, char***, int (*)(unsigned char const*, unsigned long)) (/home/ernst/projects/CyberSecurity/potato2/fuzz_potato+0x3eb1f) (BuildId: 76b93b3e5f27a1b94d101c08274bb819ce9105bd)
+    #20 0x5624356641a6 in main (/home/ernst/projects/CyberSecurity/potato2/fuzz_potato+0x691a6) (BuildId: 76b93b3e5f27a1b94d101c08274bb819ce9105bd)
+    #21 0x7fe1423121c9 in __libc_start_call_main csu/../sysdeps/nptl/libc_start_call_main.h:58:16
+    #22 0x7fe14231228a in __libc_start_main csu/../csu/libc-start.c:360:3
+    #23 0x56243562eb04 in _start (/home/ernst/projects/CyberSecurity/potato2/fuzz_potato+0x33b04) (BuildId: 76b93b3e5f27a1b94d101c08274bb819ce9105bd)
+
+NOTE: libFuzzer has rudimentary signal handlers.
+      Combine libFuzzer with AddressSanitizer or similar for better crash reports.
+SUMMARY: libFuzzer: deadly signal
+MS: 5 ShuffleBytes-ChangeBit-PersAutoDict-PersAutoDict-CopyPart- DE: "dele"-"\000\000\000\000\000\000\000\000"-; base unit: 72704113569a45f0ea8ca6abf8274b69944aa357
+artifact_prefix='./'; Test unit written to ./crash-c77d84c0343a1b5d45e946b8775d0d6e5b204fc7
+```
+## triage one input to a function or code area
+
+See Afl++ section.
 
 ## References
 
@@ -676,6 +762,7 @@ WRITE of size 59 at 0x7f02f0900052 thread T0
 
 [src/func.c](./src/func.c)  
 [src/login2.c](./src/login2.c)  
+[src/main.c](./src/main.c)  
 [src/userlist.c](./src/userlist.c)  
 
 [crashfile](./crashfile)  
