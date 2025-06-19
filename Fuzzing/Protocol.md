@@ -1,5 +1,5 @@
 Student: Ernst Schwaiger
-Date 2024-06-10
+Date 2024-06-19
 
 # Fuzzing
 
@@ -130,7 +130,7 @@ else if(strncmp(command, "changepw", 8) == 0)
 /* ... */
 ```
 
-In addition to the buffer overflow that was identified and eploited in the previous sessions,
+In addition to the buffer overflow that was identified and exploited in the previous sessions,
 an additional crashing code is inserted into the `potato` project. This code will terminate
 the application if a login is tried with a username starting with the string `foo`:
 
@@ -739,7 +739,7 @@ SUMMARY: libFuzzer: deadly signal
 MS: 5 ShuffleBytes-ChangeBit-PersAutoDict-PersAutoDict-CopyPart- DE: "dele"-"\000\000\000\000\000\000\000\000"-; base unit: 72704113569a45f0ea8ca6abf8274b69944aa357
 artifact_prefix='./'; Test unit written to ./crash-c77d84c0343a1b5d45e946b8775d0d6e5b204fc7
 ```
-## triage one input to a function or code area
+## Triage one input to a function or code area
 
 See Afl++ section.
 
